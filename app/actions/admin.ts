@@ -256,6 +256,24 @@ export async function acceptAiSuggestion(reportId: string): Promise<ActionResult
   if (a.suggested_department_id) patch.department_id = a.suggested_department_id;
   if (a.suggested_barangay_id) patch.barangay_id = a.suggested_barangay_id;
 
+  // fallback: if the AI row predates the mapping flow, fill the department
+  // from the category's configurable default when the report has none
+  if (!patch.department_id && patch.category_id) {
+    const { data: cat } = await supabase
+      .from("categories")
+      .select("default_department_id")
+      .eq("id", patch.category_id)
+      .maybeSingle();
+    const { data: report } = await supabase
+      .from("reports")
+      .select("department_id")
+      .eq("id", reportId)
+      .maybeSingle();
+    if (cat?.default_department_id && !report?.department_id) {
+      patch.department_id = cat.default_department_id;
+    }
+  }
+
   const { error } = await supabase
     .from("reports")
     .update(patch)
@@ -293,6 +311,7 @@ export async function saveCategory(input: {
   color?: string;
   icon?: string;
   is_active?: boolean;
+  default_department_id?: string | null;
 }): Promise<ActionResult> {
   await requireAdmin();
   const supabase = await createClient();
@@ -303,6 +322,7 @@ export async function saveCategory(input: {
     color: input.color || "#64748b",
     icon: input.icon || "📋",
     is_active: input.is_active ?? true,
+    default_department_id: input.default_department_id ?? null,
   };
   const { error } = input.id
     ? await supabase.from("categories").update(row).eq("id", input.id)

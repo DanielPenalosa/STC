@@ -65,8 +65,12 @@ export default function SubmitReportClient({
   const [previews, setPreviews] = useState<string[]>([]);
   const [ai, setAi] = useState<{
     detected_issue: string;
+    description: string | null;
     suggested_category_id: string | null;
     confidence: number;
+    needs_review: boolean;
+    needs_review_reason: string | null;
+    secondary_issues: string[];
   } | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -92,8 +96,12 @@ export default function SubmitReportClient({
       if (json.ok) {
         setAi({
           detected_issue: json.detected_issue,
+          description: json.description ?? null,
           suggested_category_id: json.suggested_category_id ?? null,
           confidence: json.confidence ?? 0,
+          needs_review: Boolean(json.needs_review),
+          needs_review_reason: json.needs_review_reason ?? null,
+          secondary_issues: Array.isArray(json.secondary_issues) ? json.secondary_issues : [],
         });
         if (json.suggested_category_id && !categoryId) {
           setCategoryId(json.suggested_category_id);
@@ -319,13 +327,23 @@ export default function SubmitReportClient({
                   {Math.round(ai.confidence * 100)}%
                 </span>
               </div>
+              {ai.description && (
+                <p className="mt-1 text-xs italic leading-relaxed text-primary-700/80">
+                  “{ai.description}”
+                </p>
+              )}
               <p className="mt-1 text-xs text-primary-700/80">
                 Suggested:{" "}
                 {categories.find((c) => c.id === ai.suggested_category_id)?.name ?? "—"}
               </p>
-              {ai.confidence < 0.6 && (
+              {ai.secondary_issues.length > 0 && (
+                <p className="mt-1 text-[11px] text-primary-600/80">
+                  Also spotted: {ai.secondary_issues.join(", ")}
+                </p>
+              )}
+              {(ai.needs_review || ai.confidence < 0.6) && (
                 <p className="mt-1 text-[11px] text-warn-600">
-                  Low confidence — an admin will double-check the classification.
+                  {ai.needs_review_reason ?? "Low confidence"} — an admin will double-check the classification.
                 </p>
               )}
               <p className="mt-1.5 text-[11px] leading-snug text-primary-500/80">

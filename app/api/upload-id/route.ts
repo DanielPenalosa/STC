@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { verifyUserIdPhoto } from "@/lib/ai/dispatch";
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
@@ -57,7 +58,30 @@ export async function POST(request: Request) {
       .upload(path, file, { contentType: file.type || "image/jpeg", upsert: true });
     if (error) throw error;
 
-    return NextResponse.json({ ok: true, path });
+    /* ---------- AI ID verification (modular pipeline) ----------
+     * Best-effort: any failure leaves the account pending for manual admin
+     * review — the AI assists, it never blocks or blindly approves. */
+    let aiStatus: "passed" | "needs_review" | "failed" | "unavailable" = "unavailable";
+    try {
+      const { data: profile } = await supabase
+        .from("users")
+        .select("full_name")
+        .eq("id", uid)
+        .maybeSingle();
+      const fullName = profile?.full_name ?? "";
+      if (fullName) {
+        const verdict = await verifyUserIdPhoto({
+          userId: uid,
+          idPath: path,
+          registeredFullName: fullName,
+        });
+        aiStatus = verdict?.status ?? "unavailable";
+      }
+    } catch {
+      aiStatus = "unavailable";
+    }
+
+    return NextResponse.json({ ok: true, path, ai_status: aiStatus });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "Upload failed" },

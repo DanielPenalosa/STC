@@ -22,6 +22,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [confirmSent, setConfirmSent] = useState(false);
   const [awaitingApproval, setAwaitingApproval] = useState(false);
+  const [aiApproved, setAiApproved] = useState(false);
 
   // keep the chosen ID photo between submit attempts
   useEffect(() => {
@@ -87,6 +88,10 @@ export default function RegisterPage() {
       const saved = await saveIdPhotoPath(path);
       if (!saved.ok) throw new Error(saved.error ?? "Could not save the ID reference.");
 
+      // AI pre-verified the ID during upload — surface the instant-approval
+      // outcome (the account itself stays gated until the admin is notified)
+      if (upJson.ai_status === "passed") setAiApproved(true);
+
       // approval flow: sign the fresh session out — the citizen cannot enter
       // the app until an admin approves the registration
       const supabase = createClient();
@@ -137,13 +142,18 @@ export default function RegisterPage() {
   if (awaitingApproval) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-7 text-center shadow-sm sm:p-8">
-        <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-warn-50 text-warn-600">
-          <Icon name="clock" size="lg" />
+        <span
+          className={`mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl ${
+            aiApproved ? "bg-success-50 text-success-600" : "bg-warn-50 text-warn-600"
+          }`}
+        >
+          <Icon name={aiApproved ? "check-circle" : "clock"} size="lg" />
         </span>
         <h1 className="text-xl font-bold text-slate-900">Registration submitted</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-500">
-          Your account and ID photo were received. An administrator will review
-          your registration — you can sign in once it&apos;s approved.
+          {aiApproved
+            ? "Your ID passed the automated verification check. An administrator gets a fast-track notification — you can sign in once they approve it."
+            : "Your account and ID photo were received. An administrator will review your registration — you can sign in once it's approved."}
         </p>
         <Link href="/" className={`${btn.primary} press mt-5 w-full justify-center`}>
           Back to home

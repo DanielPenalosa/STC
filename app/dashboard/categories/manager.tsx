@@ -7,7 +7,15 @@ import { Card, btn, inputCls, labelCls } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import type { Category } from "@/lib/types";
 
-export default function CategoryManager({ initial }: { initial: Category[] }) {
+type Opt = { id: string; name: string };
+
+export default function CategoryManager({
+  initial,
+  departments,
+}: {
+  initial: Category[];
+  departments: Opt[];
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState<Category | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +26,7 @@ export default function CategoryManager({ initial }: { initial: Category[] }) {
     setBusy(true);
     setError(null);
     const fd = new FormData(e.currentTarget);
+    const dept = String(fd.get("default_department_id") ?? "");
     const res = await saveCategory({
       id: editing instanceof Object ? editing.id : undefined,
       name: String(fd.get("name") ?? ""),
@@ -25,6 +34,7 @@ export default function CategoryManager({ initial }: { initial: Category[] }) {
       color: String(fd.get("color") ?? "#64748b"),
       icon: String(fd.get("icon") ?? "📋"),
       is_active: fd.get("is_active") === "on",
+      default_department_id: dept || null,
     });
     setBusy(false);
     if (!res.ok) setError(res.error ?? "Save failed");
@@ -41,8 +51,21 @@ export default function CategoryManager({ initial }: { initial: Category[] }) {
     router.refresh();
   }
 
+  const deptName = (id: string | null) =>
+    departments.find((d) => d.id === id)?.name ?? null;
+
   return (
     <div className="space-y-4">
+      <p className="flex items-start gap-2 rounded-xl bg-primary-50/70 px-3.5 py-2.5 text-xs leading-relaxed text-primary-700">
+        <Icon name="robot" size="md" className="mt-0.5 shrink-0" />
+        <span>
+          <strong>AI routing:</strong> when the photo AI classifies a report into
+          a category, it is automatically assigned to that category&apos;s{" "}
+          <strong>default department</strong> below. Edit each category to
+          change the mapping — reports already assigned keep their office.
+        </span>
+      </p>
+
       {!editing && (
         <button onClick={() => setEditing("new")} className={btn.primary}>+ New category</button>
       )}
@@ -74,6 +97,19 @@ export default function CategoryManager({ initial }: { initial: Category[] }) {
               <label className={labelCls}>Description</label>
               <input name="description" defaultValue={editing !== "new" ? editing.description ?? "" : ""} className={inputCls} />
             </div>
+            <div>
+              <label className={labelCls}>Default department (AI auto-assignment)</label>
+              <select
+                name="default_department_id"
+                defaultValue={editing !== "new" ? editing.default_department_id ?? "" : ""}
+                className={inputCls}
+              >
+                <option value="">— None (admin assigns manually) —</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </div>
             {error && <p className="rounded bg-danger-50 px-3 py-2 text-sm text-danger-600">{error}</p>}
             <div className="flex gap-2">
               <button type="submit" disabled={busy} className={btn.primary}>{busy ? "Saving…" : "Save"}</button>
@@ -92,6 +128,10 @@ export default function CategoryManager({ initial }: { initial: Category[] }) {
             <div className="min-w-0 flex-1">
               <p className="font-semibold">{c.name} {!c.is_active && <span className="text-xs font-normal text-slate-400">(inactive)</span>}</p>
               <p className="truncate text-xs text-slate-500">{c.description ?? c.slug}</p>
+              <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] font-medium text-primary-600">
+                <Icon name="building" size="sm" />
+                {deptName(c.default_department_id) ?? "No default department"}
+              </p>
             </div>
             <div className="flex shrink-0 gap-1">
               <button onClick={() => setEditing(c)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Edit" aria-label={`Edit ${c.name}`}>

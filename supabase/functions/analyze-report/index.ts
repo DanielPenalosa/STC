@@ -1,34 +1,23 @@
 // Supabase Edge Function: analyze-report
 //
-// Receives { reportId } (and/or { photoUrls, description, categoryId }).
-// 1. Loads the report, its photos and location context.
-// 2. Calls a computer-vision model to detect the issue in the photo.
-// 3. Combines photo + description + category + location to suggest
-//    category / department / barangay.
-// 4. Writes the recommendation into `ai_analysis` (recommendations ONLY —
-//    admins accept or override; low confidence is flagged for manual review).
+// Modular pipeline (shared logic mirrors lib/ai/vision.ts):
+//   Photo Upload → Image Quality Check → Problem Detection →
+//   Category Classification → Department Assignment (configurable mapping) →
+//   Needs-Review gating → write ai_analysis
+//
+// Modes:
+//   { reportId }                     — full analysis, writes ai_analysis
+//   { photoPath, description }       — precheck while citizen fills the form
 //
 // Configure secrets (Supabase dashboard → Edge Functions → Secrets):
-//   AI_VISION_PROVIDER = "openai" | "custom"
-//   OPENAI_API_KEY     = sk-...          (if provider = openai)
-//   AI_VISION_ENDPOINT = https://...     (if provider = custom)
-//   AI_VISION_API_KEY  = ...             (if provider = custom)
+//   OPENAI_API_KEY     = sk-...        (or AI_VISION_ENDPOINT for custom)
+//   AI_VISION_ENDPOINT = https://...   (optional custom provider)
 //
 // Deploy:  supabase functions deploy analyze-report
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const LOW_CONFIDENCE = 0.6;
-
-type Suggestion = {
-  detected_issue: string;
-  confidence: number;
-  suggested_category_slug: string | null;
-  suggested_department_slug: string | null;
-  suggested_barangay_name: string | null;
-  model_used: string;
-  raw_response: Record<string, unknown>;
-};
+const CONFIDENCE_THRESHOLD = 0.6;
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -36,46 +25,51 @@ const cors = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+type CategoryRow = { id: string; slug: string | null; name: string; default_department_id: string | null };
+type Issue = {
+  detected_issue: string;
+  description: string;
+  category_slug: string | null;
+  confidence: number;
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   try {
     const body = await req.json();
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
 
-    /* -------- precheck mode: { photoPath, description } --------
-     * Called from POST /api/analyze while a citizen is filling the submit
-     * form. Runs the vision model and returns the suggestion WITHOUT
-     * writing to ai_analysis. */
+    /* -------- precheck mode: { photoPath, description } -------- */
     if (!body.reportId && body.photoPath) {
-      const supabase = createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-      );
       const photoUrl = supabase.storage
         .from("report-photos")
         .getPublicUrl(body.photoPath).data.publicUrl;
-      const suggestion = await analyzePhoto(photoUrl, {
-        title: "",
-        description: body.description ?? "",
-      });
+      const { categories } = await loadCategories(supabase);
+      const result = await runVision({ imageUrl: photoUrl, context: body.description ?? "", categories });
 
       let suggestedCategoryId: string | null = null;
-      if (suggestion.suggested_category_slug) {
-        const { data: cat } = await supabase
-          .from("categories")
-          .select("id")
-          .eq("slug", suggestion.suggested_category_slug)
-          .maybeSingle();
-        suggestedCategoryId = cat?.id ?? null;
+      if (result.primary?.category_slug) {
+        suggestedCategoryId =
+          categories.find(
+            (c) => (c.slug ?? "").toLowerCase() === result.primary!.category_slug?.toLowerCase()
+          )?.id ?? null;
       }
 
       return new Response(
         JSON.stringify({
-          ok: true,
-          detected_issue: suggestion.detected_issue,
+          ok: result.ok,
+          detected_issue: result.primary?.detected_issue ?? "Unrecognized",
+          description: result.primary?.description ?? null,
           suggested_category_id: suggestedCategoryId,
-          confidence: suggestion.confidence,
-          model_used: suggestion.model_used,
+          confidence: result.primary?.confidence ?? 0,
+          needs_review: result.needs_review_reason != null,
+          needs_review_reason: result.needs_review_reason,
+          secondary_issues: result.secondary.map((s) => s.detected_issue),
+          model_used: result.model_used,
         }),
         { headers: { ...cors, "Content-Type": "application/json" } }
       );
@@ -84,11 +78,6 @@ Deno.serve(async (req: Request) => {
     /* -------- full mode: { reportId } -------- */
     const reportId = body.reportId;
     if (!reportId) throw new Error("reportId is required");
-
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
 
     // 1. Load report + joins
     const { data: report, error } = await supabase
@@ -110,52 +99,69 @@ Deno.serve(async (req: Request) => {
       ? supabase.storage.from("report-photos").getPublicUrl(photos[0].storage_path).data.publicUrl
       : null;
 
-    // 2. Ask the vision model
-    const suggestion = await analyzePhoto(photoUrl, report);
+    const { categories } = await loadCategories(supabase);
+    const context =
+      `Report title: ${report.title}\nDescription: ${report.description}` +
+      (report.barangays?.name ? `\nBarangay: ${report.barangays.name}` : "");
 
-    // 3. Resolve slugs/names to UUIDs
-    const [category, department, barangay] = await Promise.all([
-      suggestion.suggested_category_slug
-        ? supabase.from("categories").select("id").eq("slug", suggestion.suggested_category_slug).maybeSingle()
-        : Promise.resolve({ data: null }),
-      suggestion.suggested_department_slug
-        ? supabase.from("departments").select("id").eq("slug", suggestion.suggested_department_slug).maybeSingle()
-        : Promise.resolve({ data: null }),
-      suggestion.suggested_barangay_name
-        ? supabase.from("barangays").select("id").eq("name", suggestion.suggested_barangay_name).maybeSingle()
-        : Promise.resolve({ data: null }),
-    ]);
+    // 2. Run the vision pipeline
+    const result = await runVision({ imageUrl: photoUrl, context, categories });
+    const primary = result.primary;
 
-    const lowConfidence = (suggestion.confidence ?? 0) < LOW_CONFIDENCE;
+    // 3. Resolve category + department through the CONFIGURABLE mapping
+    let categoryId: string | null = null;
+    let departmentId: string | null = null;
+    if (primary?.category_slug) {
+      const cat =
+        categories.find((c) => (c.slug ?? "").toLowerCase() === primary.category_slug?.toLowerCase()) ??
+        categories.find((c) => c.name.toLowerCase() === primary.category_slug?.toLowerCase());
+      if (cat) {
+        categoryId = cat.id;
+        departmentId = cat.default_department_id; // admin-editable mapping
+      }
+    }
+
+    const lowConfidence = result.needs_review_reason != null;
 
     const { data: inserted, error: insertError } = await supabase
       .from("ai_analysis")
       .insert({
         report_id: reportId,
-        suggested_category_id: category?.data?.id ?? null,
-        suggested_department_id: department?.data?.id ?? null,
-        suggested_barangay_id: barangay?.data?.id ?? null,
-        detected_issue: suggestion.detected_issue,
-        confidence: suggestion.confidence,
-        model_used: suggestion.model_used,
-        raw_response: suggestion.raw_response,
+        suggested_category_id: categoryId,
+        suggested_department_id: lowConfidence ? null : departmentId,
+        suggested_barangay_id: null, // barangay comes from GPS detection, not vision
+        detected_issue: primary?.detected_issue ?? "Unrecognized — manual review",
+        confidence: primary?.confidence ?? 0,
+        model_used: result.model_used,
+        raw_response: {
+          description: primary?.description ?? null,
+          secondary_issues: result.secondary.map((s) => ({
+            detected_issue: s.detected_issue,
+            category_slug: s.category_slug,
+            confidence: s.confidence,
+          })),
+          quality: result.quality,
+          needs_review_reason: result.needs_review_reason,
+          provider: result.raw,
+        },
         status: lowConfidence ? "low_confidence" : "completed",
       })
       .select("id")
       .single();
     if (insertError) throw insertError;
 
-    // Notify admins for manual review when confidence is low
+    // 4. Notify admins for manual review when confidence is low / quality bad
     if (lowConfidence) {
-      const { data: admins } = await supabase
-        .from("users").select("id").eq("role", "admin");
+      const { data: admins } = await supabase.from("users").select("id").eq("role", "admin");
       if (admins?.length) {
         await supabase.from("notifications").insert(
           admins.map((a: { id: string }) => ({
             user_id: a.id,
             report_id: reportId,
             title: `AI review needed — ${report.title}`,
-            body: `Low confidence (${Math.round((suggestion.confidence ?? 0) * 100)}%) — please verify manually.`,
+            body:
+              result.needs_review_reason ??
+              `Low confidence (${Math.round((primary?.confidence ?? 0) * 100)}%) — please verify manually.`,
             type: "ai_review",
           }))
         );
@@ -173,129 +179,162 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-/* ---------------- vision provider ---------------- */
+/* ---------------- data helpers ---------------- */
 
-async function analyzePhoto(
-  photoUrl: string | null,
-  report: Record<string, any>
-): Promise<Suggestion> {
-  const provider = Deno.env.get("AI_VISION_PROVIDER") ?? "openai";
-
-  const categories = [
-    "infrastructure", "water-sanitation", "electricity-utilities",
-    "environment", "public-safety", "public-facilities", "other",
-  ];
-
-  if (provider === "openai" && Deno.env.get("OPENAI_API_KEY")) {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${Deno.env.get("OPENAI_API_KEY")}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a civic-issue computer-vision assistant for a community reporting system. " +
-              "Classify the uploaded photo and context into exactly one category slug from: " +
-              categories.join(", ") +
-              '. Respond JSON: {"detected_issue": string, "confidence": 0-1, ' +
-              '"suggested_category_slug": string|null, "notes": string}',
-          },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: `Report title: ${report.title}\nDescription: ${report.description}` },
-              ...(photoUrl
-                ? [{ type: "image_url", image_url: { url: photoUrl } }]
-                : []),
-            ],
-          },
-        ],
-      }),
-    });
-    const json = await res.json();
-    const parsed = JSON.parse(json.choices?.[0]?.message?.content ?? "{}");
-    return {
-      detected_issue: parsed.detected_issue ?? "Unrecognized",
-      confidence: Number(parsed.confidence ?? 0),
-      suggested_category_slug: parsed.suggested_category_slug ?? null,
-      suggested_department_slug: mapDepartment(parsed.suggested_category_slug),
-      suggested_barangay_name: null,
-      model_used: "gpt-4o-mini",
-      raw_response: parsed,
-    };
-  }
-
-  if (provider === "custom" && Deno.env.get("AI_VISION_ENDPOINT")) {
-    const res = await fetch(Deno.env.get("AI_VISION_ENDPOINT")!, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${Deno.env.get("AI_VISION_API_KEY") ?? ""}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ photoUrl, report }),
-    });
-    const parsed = await res.json();
-    return {
-      detected_issue: parsed.detected_issue ?? "Unrecognized",
-      confidence: Number(parsed.confidence ?? 0),
-      suggested_category_slug: parsed.suggested_category_slug ?? null,
-      suggested_department_slug: parsed.suggested_department_slug ?? mapDepartment(parsed.suggested_category_slug),
-      suggested_barangay_name: parsed.suggested_barangay_name ?? null,
-      model_used: parsed.model_used ?? "custom-vision",
-      raw_response: parsed,
-    };
-  }
-
-  // No provider configured — heuristic placeholder so the pipeline works end
-  // to end. Replace with a real CV service when the client finalizes one.
-  const text = `${report.title} ${report.description}`.toLowerCase();
-  const rules: Array<[RegExp, string, string, number]> = [
-    [/leak|pipe|plumb/, "Water Leakage", "water-sanitation", 0.72],
-    [/flood|baha/, "Flooding", "water-sanitation", 0.7],
-    [/garbage|trash|basura|dump/, "Improper Garbage Disposal", "environment", 0.68],
-    [/pothole|road damage|crack/, "Damaged Road / Pothole", "infrastructure", 0.66],
-    [/street ?light|lamp post/, "Broken Streetlight", "electricity-utilities", 0.65],
-    [/tree|branch/, "Fallen Tree", "environment", 0.6],
-    [/fire|smoke/, "Fire Hazard", "public-safety", 0.62],
-  ];
-  for (const [re, issue, slug, conf] of rules) {
-    if (re.test(text)) {
-      return {
-        detected_issue: issue,
-        confidence: conf,
-        suggested_category_slug: slug,
-        suggested_department_slug: mapDepartment(slug),
-        suggested_barangay_name: null,
-        model_used: "keyword-heuristic",
-        raw_response: { source: "keyword-heuristic", text },
-      };
-    }
-  }
-  return {
-    detected_issue: "Unclassified — manual review",
-    confidence: 0.3,
-    suggested_category_slug: "other",
-    suggested_department_slug: null,
-    suggested_barangay_name: null,
-    model_used: "keyword-heuristic",
-    raw_response: { source: "keyword-heuristic", text },
-  };
+async function loadCategories(supabase: ReturnType<typeof createClient>): Promise<{
+  categories: CategoryRow[];
+}> {
+  const { data } = await supabase
+    .from("categories")
+    .select("id, slug, name, default_department_id")
+    .eq("is_active", true);
+  return { categories: (data as unknown as CategoryRow[]) ?? [] };
 }
 
-function mapDepartment(categorySlug: string | null): string | null {
-  const map: Record<string, string> = {
-    "water-sanitation": "water-sanitation",
-    infrastructure: "engineering",
-    "electricity-utilities": "utilities",
-    environment: "environment",
-    "public-safety": "public-safety",
-    "public-facilities": "engineering",
-  };
-  return categorySlug ? map[categorySlug] ?? null : null;
+/* ---------------- vision provider (mirrors lib/ai/vision.ts) ---------------- */
+
+type VisionOutcome = {
+  ok: boolean;
+  quality: { ok: boolean; reason?: string | null } | null;
+  primary: Issue | null;
+  secondary: Issue[];
+  model_used: string;
+  needs_review_reason: string | null;
+  raw: Record<string, unknown>;
+};
+
+async function runVision(input: {
+  imageUrl: string | null;
+  context: string;
+  categories: CategoryRow[];
+}): Promise<VisionOutcome> {
+  const endpoint = Deno.env.get("AI_VISION_ENDPOINT");
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
+  const hints = input.categories.map((c) => c.slug ?? c.name.toLowerCase());
+
+  if (!endpoint && !apiKey) {
+    // No provider configured — deterministic placeholder so the pipeline
+    // works end to end and admins always receive SOMETHING reviewable.
+    return {
+      ok: false,
+      quality: null,
+      primary: null,
+      secondary: [],
+      model_used: "unconfigured",
+      needs_review_reason: "AI vision provider is not configured — manual review required.",
+      raw: {},
+    };
+  }
+
+  try {
+    let parsed: Record<string, unknown>;
+    if (endpoint) {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${Deno.env.get("AI_VISION_API_KEY") ?? ""}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ imageUrl: input.imageUrl, context: input.context, categoryHints: hints }),
+      });
+      if (!res.ok) throw new Error(`Custom vision error ${res.status}`);
+      parsed = await res.json();
+    } else {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a civic-issue computer-vision assistant for a community reporting system. " +
+                "Analyze the photo and report ALL distinct problems you can see. " +
+                "For each, pick the single best category slug from: " +
+                hints.join(", ") +
+                '. Also self-assess image quality. Respond JSON exactly: ' +
+                '{"quality": {"ok": boolean, "reason": string|null}, ' +
+                '"issues": [{"detected_issue": string, "description": string, ' +
+                '"category_slug": string|null, "confidence": number 0-1}]} ' +
+                "where issues[0] is the primary problem. " +
+                "If the photo is blurry/too dark/blocked, set quality.ok=false with a short reason " +
+                "and return an empty issues array.",
+            },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: input.context },
+                ...(input.imageUrl ? [{ type: "image_url", image_url: { url: input.imageUrl } }] : []),
+              ],
+            },
+          ],
+        }),
+      });
+      if (!res.ok) throw new Error(`Vision provider error ${res.status}`);
+      const json = await res.json();
+      parsed = JSON.parse(json.choices?.[0]?.message?.content ?? "{}");
+    }
+
+    const q = parsed.quality as { ok?: boolean; reason?: string | null } | undefined;
+    const quality = q ? { ok: q.ok !== false, reason: q.reason ?? null } : null;
+    const rawIssues = Array.isArray(parsed.issues) ? parsed.issues : [];
+    const issues: Issue[] = rawIssues
+      .map((i) => {
+        const issue = i as Record<string, unknown>;
+        return {
+          detected_issue: String(issue.detected_issue ?? "Unrecognized"),
+          description: String(issue.description ?? "").slice(0, 500),
+          category_slug: issue.category_slug ? String(issue.category_slug) : null,
+          confidence: Math.max(0, Math.min(1, Number(issue.confidence ?? 0))),
+        };
+      })
+      .filter((i) => i.detected_issue);
+
+    if (quality && !quality.ok) {
+      return {
+        ok: false,
+        quality,
+        primary: null,
+        secondary: [],
+        model_used: endpoint ? "custom" : "openai:gpt-4o-mini",
+        needs_review_reason: `Photo quality issue (${quality.reason ?? "unknown"}) — manual review.`,
+        raw: parsed,
+      };
+    }
+    const [primary, ...secondary] = issues;
+    if (!primary) {
+      return {
+        ok: false,
+        quality,
+        primary: null,
+        secondary: [],
+        model_used: endpoint ? "custom" : "openai:gpt-4o-mini",
+        needs_review_reason: "No recognizable issue found in the photo.",
+        raw: parsed,
+      };
+    }
+
+    return {
+      ok: true,
+      quality,
+      primary,
+      secondary,
+      model_used: endpoint ? "custom" : "openai:gpt-4o-mini",
+      needs_review_reason:
+        primary.confidence < CONFIDENCE_THRESHOLD ? "Low AI confidence" : null,
+      raw: parsed,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      quality: null,
+      primary: null,
+      secondary: [],
+      model_used: endpoint ? "custom" : "openai:gpt-4o-mini",
+      needs_review_reason: `AI unavailable: ${String(e)}`,
+      raw: {},
+    };
+  }
 }

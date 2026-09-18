@@ -16,6 +16,25 @@ export type Profile = {
   verified_at: string | null;
   verified_by: string | null;
   rejection_reason: string | null;
+  id_verification_status: "not_run" | "processing" | "passed" | "needs_review" | "failed" | null;
+  id_verification: {
+    extracted?: {
+      id_type: string | null;
+      full_name: string | null;
+      date_of_birth: string | null;
+      id_number: string | null;
+      address: string | null;
+      expiration_date: string | null;
+    } | null;
+    ocr_confidence?: number;
+    verification_score?: number;
+    reasons?: string[];
+    name_match?: { matched: boolean; score: number };
+    id_type?: string | null;
+    model_used?: string;
+    checked_at?: string;
+  } | null;
+  id_verified_at: string | null;
   is_active: boolean;
   created_at: string;
 };
@@ -28,6 +47,7 @@ export type Category = {
   color: string;
   icon: string;
   is_active: boolean;
+  default_department_id: string | null;
 };
 
 export type Barangay = {
