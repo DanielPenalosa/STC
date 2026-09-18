@@ -82,20 +82,24 @@ body {
    Motion — page transitions & micro-interactions
    ============================================================ */
 
-/* page enter: subtle fade + rise, used on every route change */
+/* page enter: quick pure fade — no translate, no layout shift */
 @keyframes page-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
 .page-enter {
-  animation: page-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: page-in 0.16s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter {
+    animation: none;
+  }
 }
 
 /* staggered children (dashboards: cards arrive one after another) */
