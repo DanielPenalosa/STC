@@ -93,6 +93,10 @@ export default async function DashboardLayout({
 
   const nav = NAV[profile.role] ?? NAV.citizen;
   const flatNav = nav.flatMap((g) => g.items);
+  // Mobile bottom nav: drop the Notifications tab (the header bell already
+  // covers it) so the center report button gets a clean slot instead of
+  // overlapping the tabs around it.
+  const mobileNav = flatNav.filter((i) => i.href !== "/dashboard/notifications");
 
   return (
     <RealtimeProvider userId={profile.id} initialNotifications={[]}>
@@ -195,7 +199,7 @@ export default async function DashboardLayout({
 
           {/* ---------- mobile bottom nav (all items, scrollable) ---------- */}
           <MobileNav
-            items={flatNav}
+            items={mobileNav}
             actionIcon={profile.role === "citizen" ? "camera" : "plus"}
             actionLabel={
               profile.role === "citizen" ? "Report an issue" : "New report"
