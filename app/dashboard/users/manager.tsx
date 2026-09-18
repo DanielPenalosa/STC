@@ -396,17 +396,48 @@ export default function UserManager({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-slate-800">
                     {u.full_name ?? "(no name)"}
+                    {u.id_verification_status === "passed" && (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-success-50 px-2 py-0.5 text-[10px] font-bold text-success-700 ring-1 ring-success-200">
+                        <Icon name="robot" size="sm" /> AI verified
+                        {typeof u.id_verification?.verification_score === "number" &&
+                          ` ${Math.round(u.id_verification.verification_score * 100)}%`}
+                      </span>
+                    )}
+                    {u.id_verification_status === "needs_review" && (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-warn-50 px-2 py-0.5 text-[10px] font-bold text-warn-700 ring-1 ring-warn-200">
+                        <Icon name="robot" size="sm" /> AI needs review
+                      </span>
+                    )}
+                    {u.id_verification_status === "failed" && (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-danger-50 px-2 py-0.5 text-[10px] font-bold text-danger-700 ring-1 ring-danger-200">
+                        <Icon name="robot" size="sm" /> AI failed
+                      </span>
+                    )}
                   </p>
                   <p className="truncate text-xs text-slate-400">
                     {u.email ?? "no email"} · {u.phone ?? "no phone"} · registered{" "}
                     {new Date(u.created_at).toLocaleDateString()}
                   </p>
+                  {u.id_verification?.extracted && (
+                    <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                      ID says: <span className="font-semibold text-slate-600">{u.id_verification.extracted.full_name ?? "?"}</span>
+                      {u.id_verification.extracted.id_type ? ` · ${u.id_verification.extracted.id_type.replace(/_/g, " ")}` : ""}
+                      {typeof u.id_verification.name_match?.score === "number" &&
+                        ` · name match ${Math.round(u.id_verification.name_match.score * 100)}%`}
+                    </p>
+                  )}
+                  {u.id_verification?.reasons && u.id_verification.reasons.length > 0 && (
+                    <p className="mt-0.5 truncate text-[11px] text-warn-600">
+                      {u.id_verification.reasons.join(" · ")}
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => void openId(u)}
                     disabled={!u.id_photo_path || busy}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-warn-200 bg-warn-50 px-3 py-1.5 text-xs font-semibold text-warn-800 hover:bg-warn-100 disabled:opacity-50"
+                    title="View the uploaded ID photo"
                   >
                     <Icon name="eye" size="sm" />
                     {idLoading === u.id ? "Loading…" : "View ID"}
