@@ -53,6 +53,31 @@ export type GeoPlace = {
   displayName: string | null;
 };
 
+/*
+ * Tiny server-side cache. Nominatim's fair-use policy allows ~1 req/s; a
+ * burst of reports from the same spot (or a citizen retrying the GPS button)
+ * must not hammer it — identical coordinates return the cached answer.
+ */
+const geoCache = new Map<string, { place: GeoPlace | null; at: number }>();
+const GEO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const GEO_CACHE_MAX = 500;
+
+async function cachedGeocode(lat: number, lng: number): Promise<GeoPlace | null> {
+  // round to ~5 decimal places (~1 m) so near-identical fixes share entries
+  const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  const cached = geoCache.get(key);
+  if (cached && Date.now() - cached.at < GEO_CACHE_TTL_MS) return cached.place;
+
+  const place = await nominatimReverse(lat, lng);
+
+  if (geoCache.size >= GEO_CACHE_MAX) {
+    const oldest = geoCache.keys().next().value;
+    if (oldest !== undefined) geoCache.delete(oldest);
+  }
+  geoCache.set(key, { place, at: Date.now() });
+  return place;
+}
+
 /**
  * Ask OpenStreetMap's free Nominatim service what place sits at (lat, lng).
  * Used as a fallback when the coordinates don't match any configured
@@ -66,6 +91,10 @@ export async function reverseGeocode(
   lat: number,
   lng: number
 ): Promise<GeoPlace | null> {
+  return cachedGeocode(lat, lng);
+}
+
+async function nominatimReverse(lat: number, lng: number): Promise<GeoPlace | null> {
   const url =
     `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
     `&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}` +

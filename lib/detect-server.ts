@@ -8,17 +8,36 @@ export type BarangayResolution =
   | { barangayId: string; barangayName: string; source: "geocoded" | "geocoded_new"; displayName: string | null }
   | { barangayId: null; source: "outside"; placeName: string | null; locality: string | null };
 
-const stripBrgyPrefix = (s: string) =>
-  s.toLowerCase().replace(/^brgy\.?\s*|^barangay\s*/i, "").trim();
+const normalizeName = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/^brgy\.?\s*|^barangay\s*/i, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** Names match ignoring "Brgy." prefixes, punctuation, case and extra words. */
+function namesMatch(a: string, b: string): boolean {
+  const na = normalizeName(a);
+  const nb = normalizeName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  // tolerate compound labels: DB "Barangay San Diego" vs OSM "San Diego,
+  // Santa Cruz" — but avoid tiny fragments causing false hits
+  const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na];
+  return short.length >= 4 && long.includes(short);
+}
 
 /**
- * Two-pass barangay resolution, shared by /api/detect-barangay and
- * createReport so the client preview and the server-side routing always
- * agree:
+ * Barangay resolution, shared by /api/detect-barangay and createReport so
+ * the client preview and the server-side routing always agree.
  *
- *  1. Nearest configured barangay center within MAX_DISTANCE_KM
- *  2. OpenStreetMap reverse geocode — works anywhere, auto-creating a
- *     barangay row the first time an unmapped area is reported
+ * Pass 1 — OpenStreetMap reverse geocode (AUTHORITATIVE): asks what real
+ *    place sits at the coordinates, then matches it against the configured
+ *    barangays by name. This respects actual boundaries — an incorrectly
+ *    placed center point can no longer hijack the result.
+ * Pass 2 — nearest configured center within MAX_DISTANCE_KM, used only when
+ *    the geocoder is unreachable (offline, timeout, rate-limited).
  *
  * `client` is the regular (RLS) server client used for reads. The rare
  * auto-create insert uses the service-role client because citizens are not
@@ -36,25 +55,12 @@ export async function resolveBarangay(
     .eq("is_active", true);
   const barangays = (brgyData as unknown as Barangay[]) ?? [];
 
-  /* pass 1 — configured centers */
-  const hit = detectBarangay(lat, lng, barangays);
-  if (hit) {
-    return {
-      barangayId: hit.barangay.id,
-      barangayName: hit.barangay.name,
-      source: "center",
-      distanceKm: hit.distanceKm,
-    };
-  }
-
-  /* pass 2 — reverse geocode (works anywhere on the map) */
+  /* pass 1 — reverse geocode: real barangay boundaries */
   const place = await reverseGeocode(lat, lng);
   const detectedName = place?.barangayName ?? null;
 
   if (detectedName) {
-    const existing = barangays.find(
-      (b) => stripBrgyPrefix(b.name) === stripBrgyPrefix(detectedName)
-    );
+    const existing = barangays.find((b) => namesMatch(b.name, detectedName));
     if (existing) {
       return {
         barangayId: existing.id,
@@ -64,6 +70,8 @@ export async function resolveBarangay(
       };
     }
 
+    // never seen this area before — auto-create the barangay row so the
+    // report still routes somewhere real
     const admin = createAdminClient();
     const { data: created, error } = await admin
       .from("barangays")
@@ -88,6 +96,17 @@ export async function resolveBarangay(
         displayName: place?.displayName ?? null,
       };
     }
+  }
+
+  /* pass 2 — fallback: nearest configured center (geocoder unavailable) */
+  const hit = detectBarangay(lat, lng, barangays);
+  if (hit) {
+    return {
+      barangayId: hit.barangay.id,
+      barangayName: hit.barangay.name,
+      source: "center",
+      distanceKm: hit.distanceKm,
+    };
   }
 
   /* nothing matched — still return a readable place name */

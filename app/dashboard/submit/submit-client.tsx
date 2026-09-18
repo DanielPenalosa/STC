@@ -15,6 +15,7 @@ type DetectionState =
   | { phase: "detected"; barangayId: string; label: string; accuracyNote?: string }
   | { phase: "outside"; coords: { lat: number; lng: number }; placeName?: string | null }
   | { phase: "denied" }
+  | { phase: "timeout" }
   | { phase: "unsupported" };
 
 function Section({
@@ -109,53 +110,102 @@ export default function SubmitReportClient({
    * Capture GPS and auto-detect the barangay. The citizen never picks a
    * barangay — the system resolves it from the coordinates.
    */
+  /**
+   * Capture GPS and auto-detect the barangay. The citizen never picks a
+   * barangay — the system resolves it from the coordinates.
+   *
+   * Accuracy matters: the FIRST fix a phone reports is often a coarse
+   * cell-tower/wi-fi fix that can land hundreds of meters away — in a town
+   * of compact barangays that means the WRONG barangay. So we watch the GPS
+   * for a few seconds and keep the most accurate fix (stopping early once
+   * it's good), then send THAT one to detection.
+   */
   function useGps() {
     if (!navigator.geolocation) {
       setDetection({ phase: "unsupported" });
       return;
     }
     setDetection({ phase: "locating" });
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords;
-        setCoords({ lat: latitude, lng: longitude });
-        try {
-          const res = await fetch("/api/detect-barangay", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ lat: latitude, lng: longitude }),
-          });
-          const json = await res.json();
-          if (json.ok && json.barangay_id) {
-            setDetection({
-              phase: "detected",
-              barangayId: json.barangay_id,
-              label: json.barangay_name,
-              accuracyNote:
-                json.distance_km != null
-                  ? `${Math.round(json.distance_km * 1000)} m from center`
-                  : json.display_name ?? "Detected from your GPS coordinates",
-            });
-          } else if (json.ok && json.reason === "outside") {
-            setDetection({
-              phase: "outside",
-              coords: { lat: latitude, lng: longitude },
-              placeName: json.place_name ?? null,
-            });
-          } else {
-            setDetection({
-              phase: "outside",
-              coords: { lat: latitude, lng: longitude },
-              placeName: null,
-            });
-          }
-        } catch {
-          setDetection({ phase: "outside", coords: { lat: latitude, lng: longitude } });
-        }
+
+    let best: GeolocationPosition | null = null;
+    let denied = false;
+    let settled = false;
+    let watchId: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const stop = () => {
+      if (watchId !== undefined) navigator.geolocation.clearWatch(watchId);
+      if (timer !== undefined) clearTimeout(timer);
+    };
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      stop();
+      if (!best) {
+        setDetection({ phase: denied ? "denied" : "timeout" });
+        return;
+      }
+      void detectFrom(best);
+    };
+
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const acc = pos.coords.accuracy;
+        if (!best || acc < best.coords.accuracy) best = pos;
+        if (acc <= 30) finish(); // accurate enough — no need to keep waiting
       },
-      () => setDetection({ phase: "denied" }),
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+      () => {
+        denied = true;
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
+    // hard cap — never keep the citizen waiting longer than this
+    timer = setTimeout(finish, 10000);
+  }
+
+  async function detectFrom(pos: GeolocationPosition) {
+    const { latitude, longitude } = pos.coords;
+    const accuracy = pos.coords.accuracy;
+    setCoords({ lat: latitude, lng: longitude });
+    try {
+      const res = await fetch("/api/detect-barangay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: latitude, lng: longitude }),
+      });
+      const json = await res.json();
+      const accNote =
+        Number.isFinite(accuracy) && accuracy > 0
+          ? `GPS accuracy ±${Math.round(accuracy)} m`
+          : null;
+      if (json.ok && json.barangay_id) {
+        const street =
+          typeof json.display_name === "string" ? json.display_name : null;
+        setDetection({
+          phase: "detected",
+          barangayId: json.barangay_id,
+          label: json.barangay_name,
+          accuracyNote:
+            [street, accNote].filter((s): s is string => Boolean(s)).join(" · ") ||
+            undefined,
+        });
+      } else if (json.ok && json.reason === "outside") {
+        setDetection({
+          phase: "outside",
+          coords: { lat: latitude, lng: longitude },
+          placeName: json.place_name ?? null,
+        });
+      } else {
+        setDetection({
+          phase: "outside",
+          coords: { lat: latitude, lng: longitude },
+          placeName: null,
+        });
+      }
+    } catch {
+      setDetection({ phase: "outside", coords: { lat: latitude, lng: longitude } });
+    }
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -319,7 +369,7 @@ export default function SubmitReportClient({
             className={`press flex w-full items-center gap-3 rounded-xl border p-3.5 text-left transition ${
               detection.phase === "detected"
                 ? "border-success-200 bg-success-50/60"
-                : detection.phase === "outside" || detection.phase === "denied" || detection.phase === "unsupported"
+                : detection.phase === "outside" || detection.phase === "denied" || detection.phase === "timeout" || detection.phase === "unsupported"
                 ? "border-warn-200 bg-warn-50/50"
                 : "border-slate-200 bg-white hover:bg-slate-50"
             }`}>
@@ -385,6 +435,16 @@ export default function SubmitReportClient({
                   </span>
                 </>
               )}
+              {detection.phase === "timeout" && (
+                <>
+                  <span className="block text-sm font-semibold text-warn-700">
+                    Couldn&apos;t get an accurate location
+                  </span>
+                  <span className="block text-xs text-warn-600/90">
+                    Move to an open area and tap again, or describe the location below
+                  </span>
+                </>
+              )}
               {detection.phase === "unsupported" && (
                 <>
                   <span className="block text-sm font-semibold text-warn-700">
@@ -401,9 +461,9 @@ export default function SubmitReportClient({
             )}
           </button>
           <p className="text-[11px] leading-relaxed text-slate-400">
-            Tip: GPS works best outdoors. If your barangay still isn’t found, the
-            municipality may not have mapped it yet — submit anyway and staff will
-            assign it.
+            Tip: GPS works best outdoors. We wait a few seconds for an accurate
+            fix before detecting your barangay — if it&apos;s still wrong, tap to
+            retry.
           </p>
 
           <div>
