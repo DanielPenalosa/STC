@@ -194,7 +194,13 @@ export default async function DashboardLayout({
           </main>
 
           {/* ---------- mobile bottom nav (all items, scrollable) ---------- */}
-          <MobileNav items={flatNav} />
+          <MobileNav
+            items={flatNav}
+            actionIcon={profile.role === "citizen" ? "camera" : "plus"}
+            actionLabel={
+              profile.role === "citizen" ? "Report an issue" : "New report"
+            }
+          />
         </div>
       </div>
     </RealtimeProvider>

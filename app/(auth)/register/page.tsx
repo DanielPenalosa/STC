@@ -71,26 +71,25 @@ export default function RegisterPage() {
       return;
     }
 
-    // upload the ID photo straight from the browser to the private bucket
-    // (server actions cap request bodies at ~1 MB — files must not go through them)
+    // Upload the ID via the server route /api/upload-id, which stores it in
+    // the private bucket under the caller's own folder. This avoids depending
+    // on storage RLS policies being present on the live deployment.
     try {
-      const supabase = createClient();
-      const { data: userData } = await supabase.auth.getUser();
-      const uid = userData.user?.id;
-      if (!uid) throw new Error("Session not ready — please sign in again.");
-
-      const ext = (idFile.name.split(".").pop() ?? "jpg").toLowerCase();
-      const path = `${uid}/id-card.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from("verification-ids")
-        .upload(path, idFile, { contentType: idFile.type, upsert: true });
-      if (upErr) throw upErr;
+      const fd = new FormData();
+      fd.append("file", idFile);
+      const upRes = await fetch("/api/upload-id", { method: "POST", body: fd });
+      const upJson = await upRes.json().catch(() => null);
+      if (!upRes.ok || !upJson?.ok) {
+        throw new Error(upJson?.error ?? "Upload failed");
+      }
+      const path: string = upJson.path;
 
       const saved = await saveIdPhotoPath(path);
       if (!saved.ok) throw new Error(saved.error ?? "Could not save the ID reference.");
 
       // approval flow: sign the fresh session out — the citizen cannot enter
       // the app until an admin approves the registration
+      const supabase = createClient();
       await supabase.auth.signOut();
     } catch (err) {
       const supabase = createClient();
