@@ -1,0 +1,25 @@
+{
+  "name": "[CLIENT NAME] — Smart Community Reporting",
+  "short_name": "[CLIENT NAME]",
+  "description": "Report community issues in [CITY/MUNICIPALITY] — potholes, leaks, broken streetlights and more. Track them to resolution.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F9F9F9",
+  "theme_color": "#2333A0",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "447x447",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "447x447",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

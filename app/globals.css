@@ -1,0 +1,223 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+  scroll-behavior: smooth;
+  /* stop iOS Safari auto-zooming the page when a form control is focused */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* prevent iOS auto-zoom: form controls must never render below 16px on touch */
+@media (max-width: 1024px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* long words/URLs must never force horizontal page scroll */
+body {
+  overflow-x: hidden;
+}
+p,
+h1,
+h2,
+h3,
+span,
+div {
+  overflow-wrap: break-word;
+}
+
+/* comfortable minimum tap targets on touch devices */
+@media (pointer: coarse) {
+  button,
+  a,
+  select,
+  input[type="checkbox"],
+  input[type="radio"] {
+    touch-action: manipulation;
+  }
+}
+
+body {
+  /* off white #F9F9F9 — official Santa Cruz page background */
+  @apply bg-surface text-slate-900 antialiased;
+  /* keep content clear of browser chrome on mobile */
+  overscroll-behavior-y: none;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* hide horizontal scrollbars on filter pill rows while keeping scroll */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* iOS PWA safe areas */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* ============================================================
+   Motion — page transitions & micro-interactions
+   ============================================================ */
+
+/* page enter: subtle fade + rise, used on every route change */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: page-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* staggered children (dashboards: cards arrive one after another) */
+.stagger > * {
+  animation: page-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0.02s; }
+.stagger > *:nth-child(2) { animation-delay: 0.06s; }
+.stagger > *:nth-child(3) { animation-delay: 0.1s; }
+.stagger > *:nth-child(4) { animation-delay: 0.14s; }
+.stagger > *:nth-child(5) { animation-delay: 0.18s; }
+.stagger > *:nth-child(6) { animation-delay: 0.22s; }
+.stagger > *:nth-child(7) { animation-delay: 0.26s; }
+.stagger > *:nth-child(8) { animation-delay: 0.3s; }
+
+/* hover lift + press feedback for interactive blocks */
+.hover-lift {
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -8px rgb(15 23 42 / 0.18);
+}
+.press {
+  transition: transform 0.12s ease;
+}
+.press:active {
+  transform: scale(0.97);
+}
+
+/* smooth link/button default micro-interaction */
+a,
+button,
+select,
+input[type="checkbox"] {
+  transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+  transition-duration: 0.16s;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* sidebar nav active dot pulse */
+@keyframes dot-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.7; }
+}
+.nav-dot-active {
+  animation: dot-pulse 1.8s ease-in-out infinite;
+}
+
+/* leaflet container fix inside rounded cards */
+.leaflet-container {
+  border-radius: inherit;
+  font: inherit;
+}
+
+/* marker cluster styling */
+.marker-cluster-small,
+.marker-cluster-medium,
+.marker-cluster-large {
+  background: transparent;
+}
+.marker-cluster div {
+  width: 34px !important;
+  height: 34px !important;
+  margin: 0 !important;
+  border-radius: 9999px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 34px !important;
+  text-align: center;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 0.35);
+  border: 2px solid #fff;
+}
+.marker-cluster-small div { background: #2E8254; }
+.marker-cluster-medium div { background: #F5E606; color: #060606; }
+.marker-cluster-large div { background: #DF1B2C; }
+
+/* map fade-in */
+.map-fade {
+  animation: page-in 0.5s ease both;
+}
+
+/* small screens: tighten stat overlays */
+@media (max-width: 420px) {
+  .map-stats-card {
+    left: 0.5rem;
+    top: 0.5rem;
+    width: 10.5rem;
+    padding: 0.65rem;
+  }
+  .map-stats-card .text-3xl {
+    font-size: 1.4rem;
+  }
+}
+
+/* the stats overlay sits inside a small map on phones — shrink it */
+@media (max-width: 640px) {
+  .map-stats-card-sm {
+    left: 0.5rem;
+    top: 0.5rem;
+    width: 9.5rem;
+    padding: 0.6rem;
+  }
+  .map-stats-card-sm p.text-3xl {
+    font-size: 1.35rem;
+  }
+  .map-stats-card-sm .hide-sm {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .stagger > *,
+  .hover-lift,
+  .press,
+  .nav-dot-active,
+  .map-fade {
+    animation: none !important;
+    transition: none !important;
+  }
+}

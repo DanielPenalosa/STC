@@ -1,0 +1,631 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireProfile } from "@/lib/data";
+import type { ReportStatus } from "@/lib/constants";
+import type {
+  Barangay,
+  Category,
+  Department,
+  Profile,
+} from "@/lib/types";
+
+export type ActionResult = { ok: boolean; error?: string; userId?: string };
+
+async function requireAdmin() {
+  const profile = await requireProfile();
+  if (profile.role !== "admin") throw new Error("Admins only");
+  return profile;
+}
+
+/* ------------------------------ staff account creation (admin only) ------------------------------ */
+
+/**
+ * Create a department or barangay staff account. Staff accounts can ONLY be
+ * created here by an admin — public registration always yields citizens
+ * (enforced again by the DB trigger `handle_new_user`).
+ */
+export async function createStaffAccount(input: {
+  fullName: string;
+  email: string;
+  password: string;
+  phone?: string;
+  role: "department" | "barangay" | "admin";
+  departmentId?: string | null;
+  barangayId?: string | null;
+}): Promise<ActionResult> {
+  await requireAdmin();
+  const admin = createAdminClient();
+
+  if (input.role !== "admin" && !input.departmentId && !input.barangayId) {
+    return { ok: false, error: "Select the department or barangay this account belongs to." };
+  }
+
+  // 1. create the auth user (service role bypasses email confirmation);
+  //    the on_auth_user_created trigger reads role/department/barangay from metadata
+  const { data, error } = await admin.auth.admin.createUser({
+    email: input.email,
+    password: input.password,
+    email_confirm: true,
+    user_metadata: {
+      full_name: input.fullName,
+      phone: input.phone ?? "",
+      role: input.role,
+      department_id: input.departmentId ?? "",
+      barangay_id: input.barangayId ?? "",
+    },
+  });
+  if (error) return { ok: false, error: error.message };
+  const userId = data.user.id;
+
+  // 2. belt-and-braces: ensure the profile row matches the request
+  const patch: Record<string, unknown> = {
+    full_name: input.fullName,
+    phone: input.phone ?? null,
+    role: input.role,
+  };
+  if (input.role === "department") patch.department_id = input.departmentId ?? null;
+  if (input.role === "barangay") patch.barangay_id = input.barangayId ?? null;
+
+  const admin2 = createAdminClient();
+  const { error: pError } = await admin2
+    .from("users")
+    .update(patch)
+    .eq("id", userId);
+
+  if (pError) {
+    // roll the auth user back so a failed creation doesn't leave orphans
+    await admin.auth.admin.deleteUser(userId);
+    return { ok: false, error: pError.message };
+  }
+
+  revalidatePath("/dashboard/users");
+ return { ok: true, userId };
+}
+
+/* ------------------------------ reports ------------------------------ */
+
+export async function setReportStatus(
+  reportId: string,
+  status: ReportStatus,
+  note?: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("reports")
+    .update({ status })
+    .eq("id", reportId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/reports");
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true };
+}
+
+export async function setPriority(
+  reportId: string,
+  priority: "low" | "medium" | "high"
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("reports")
+    .update({ priority })
+    .eq("id", reportId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/reports");
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true };
+}
+
+export async function verifyReport(reportId: string): Promise<ActionResult> {
+  return setReportStatus(reportId, "verified");
+}
+
+export async function deleteReport(reportId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("reports")
+    .delete()
+    .eq("id", reportId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/reports");
+  return { ok: true };
+}
+
+export async function assignReport(
+  reportId: string,
+  assignedType: "department" | "barangay",
+  targetId: string,
+  note?: string
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const supabase = await createClient();
+
+  const { error: aError } = await supabase.from("assignments").insert({
+    report_id: reportId,
+    assigned_type: assignedType,
+    department_id: assignedType === "department" ? targetId : null,
+    barangay_id: assignedType === "barangay" ? targetId : null,
+    assigned_by: admin.id,
+    note: note ?? null,
+  });
+  if (aError) return { ok: false, error: aError.message };
+
+  const patch: Record<string, string> = { status: "assigned" };
+  if (assignedType === "department") patch.department_id = targetId;
+  else patch.barangay_id = targetId;
+
+  const { error: rError } = await supabase
+    .from("reports")
+    .update(patch)
+    .eq("id", reportId);
+  if (rError) return { ok: false, error: rError.message };
+
+  // notify the assignee side (department/barangay staff accounts)
+  const col = assignedType === "department" ? "department_id" : "barangay_id";
+  const { data: staff } = await supabase
+    .from("users")
+    .select("id")
+    .eq("role", assignedType)
+    .eq(col, targetId);
+  if (staff?.length) {
+    const { data: rep } = await supabase
+      .from("reports")
+      .select("ref_code, title")
+      .eq("id", reportId)
+      .maybeSingle();
+    await supabase.from("notifications").insert(
+      (staff as { id: string }[]).map((s) => ({
+        user_id: s.id,
+        report_id: reportId,
+        title: `New report assigned — ${rep?.ref_code ?? ""}`,
+        body: `You have a new assigned report: ${rep?.title ?? ""}`,
+        type: "assignment",
+      }))
+    );
+  }
+
+  revalidatePath("/dashboard/reports");
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true };
+}
+
+export async function reassignReport(
+  reportId: string,
+  assignedType: "department" | "barangay",
+  targetId: string,
+  note?: string
+): Promise<ActionResult> {
+  return assignReport(reportId, assignedType, targetId, note ?? "Reassigned");
+}
+
+/* ------------------------------ AI ------------------------------ */
+
+export async function overrideAi(
+  reportId: string,
+  patch: {
+    categoryId?: string | null;
+    departmentId?: string | null;
+    barangayId?: string | null;
+  }
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("reports")
+    .update({
+      ...(patch.categoryId !== undefined ? { category_id: patch.categoryId } : {}),
+      ...(patch.departmentId !== undefined ? { department_id: patch.departmentId } : {}),
+      ...(patch.barangayId !== undefined ? { barangay_id: patch.barangayId } : {}),
+    })
+    .eq("id", reportId);
+  if (error) return { ok: false, error: error.message };
+
+  await supabase
+    .from("ai_analysis")
+    .update({ status: "reviewed" })
+    .eq("report_id", reportId)
+    .in("status", ["completed", "low_confidence", "pending"]);
+
+  revalidatePath("/dashboard/ai");
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true };
+}
+
+export async function acceptAiSuggestion(reportId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: ai } = await supabase
+    .from("ai_analysis")
+    .select("*")
+    .eq("report_id", reportId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!ai) return { ok: false, error: "No AI analysis found for this report" };
+  const a = ai as Record<string, string | null>;
+
+  const patch: Record<string, string | null> = {};
+  if (a.suggested_category_id) patch.category_id = a.suggested_category_id;
+  if (a.suggested_department_id) patch.department_id = a.suggested_department_id;
+  if (a.suggested_barangay_id) patch.barangay_id = a.suggested_barangay_id;
+
+  const { error } = await supabase
+    .from("reports")
+    .update(patch)
+    .eq("id", reportId);
+  if (error) return { ok: false, error: error.message };
+
+  await supabase
+    .from("ai_analysis")
+    .update({ status: "reviewed" })
+    .eq("report_id", reportId);
+
+  revalidatePath("/dashboard/ai");
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true };
+}
+
+export async function markAiReviewed(reportId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  await supabase
+    .from("ai_analysis")
+    .update({ status: "reviewed" })
+    .eq("report_id", reportId);
+  revalidatePath("/dashboard/ai");
+  return { ok: true };
+}
+
+/* ------------------------------ categories / barangays / departments ------------------------------ */
+
+export async function saveCategory(input: {
+  id?: string;
+  name: string;
+  slug?: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  is_active?: boolean;
+}): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const row = {
+    name: input.name,
+    slug: input.slug || input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
+    description: input.description || null,
+    color: input.color || "#64748b",
+    icon: input.icon || "📋",
+    is_active: input.is_active ?? true,
+  };
+  const { error } = input.id
+    ? await supabase.from("categories").update(row).eq("id", input.id)
+    : await supabase.from("categories").insert(row);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/categories");
+  return { ok: true };
+}
+
+export async function deleteCategory(id: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase.from("categories").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/categories");
+  return { ok: true };
+}
+
+export async function saveBarangay(input: {
+  id?: string;
+  name: string;
+  description?: string;
+  captain_name?: string;
+  contact_number?: string;
+  center_lat?: number | null;
+  center_lng?: number | null;
+  is_active?: boolean;
+}): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const row = {
+    name: input.name,
+    description: input.description || null,
+    captain_name: input.captain_name || null,
+    contact_number: input.contact_number || null,
+    center_lat: input.center_lat ?? null,
+    center_lng: input.center_lng ?? null,
+    is_active: input.is_active ?? true,
+  };
+  const { error } = input.id
+    ? await supabase.from("barangays").update(row).eq("id", input.id)
+    : await supabase.from("barangays").insert(row);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/barangays");
+  return { ok: true };
+}
+
+export async function deleteBarangay(id: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase.from("barangays").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/barangays");
+  return { ok: true };
+}
+
+export async function saveDepartment(input: {
+  id?: string;
+  name: string;
+  slug?: string;
+  description?: string;
+  head_name?: string;
+  contact_number?: string;
+  color?: string;
+  is_active?: boolean;
+}): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const row = {
+    name: input.name,
+    slug: input.slug || input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
+    description: input.description || null,
+    head_name: input.head_name || null,
+    contact_number: input.contact_number || null,
+    color: input.color || "#2333A0",
+    is_active: input.is_active ?? true,
+  };
+  const { error } = input.id
+    ? await supabase.from("departments").update(row).eq("id", input.id)
+    : await supabase.from("departments").insert(row);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/departments");
+  return { ok: true };
+}
+
+export async function deleteDepartment(id: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase.from("departments").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/departments");
+  return { ok: true };
+}
+
+/* ------------------------------ users ------------------------------ */
+
+export async function verifyCitizen(userId: string): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("users")
+    .update({
+      verification_status: "verified",
+      verified_at: new Date().toISOString(),
+      verified_by: admin.id,
+      rejection_reason: null,
+    })
+    .eq("id", userId);
+  if (error) return { ok: false, error: error.message };
+
+  await supabase.from("notifications").insert({
+    user_id: userId,
+    title: "Registration approved",
+    body: "Welcome! Your account is approved — you can now sign in and submit reports.",
+    type: "status_change",
+  });
+  revalidatePath("/dashboard/verification");
+  revalidatePath("/dashboard/users");
+  return { ok: true };
+}
+
+export async function rejectCitizen(
+  userId: string,
+  reason: string
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("users")
+    .update({
+      verification_status: "rejected",
+      verified_at: new Date().toISOString(),
+      verified_by: admin.id,
+      rejection_reason: reason || "ID could not be validated",
+    })
+    .eq("id", userId);
+  if (error) return { ok: false, error: error.message };
+
+  await supabase.from("notifications").insert({
+    user_id: userId,
+    title: "Registration not approved",
+    body:
+      reason ||
+      "Your registration was rejected. Please contact the municipal office for assistance.",
+    type: "status_change",
+  });
+  revalidatePath("/dashboard/verification");
+  revalidatePath("/dashboard/users");
+  return { ok: true };
+}
+
+/** Signed URL for a citizen's ID photo — admins only, short-lived. */
+export async function getIdPhotoUrl(
+  path: string
+): Promise<{ ok: boolean; url?: string; error?: string }> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { data, error } = await supabase.storage
+    .from("verification-ids")
+    .createSignedUrl(path, 300);
+  if (error || !data) return { ok: false, error: error?.message ?? "No URL" };
+  return { ok: true, url: data.signedUrl };
+}
+
+export async function saveUserRole(
+  userId: string,
+  role: "citizen" | "admin" | "department" | "barangay",
+  departmentId?: string | null,
+  barangayId?: string | null,
+  isActive?: boolean
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const patch: Record<string, unknown> = { role };
+  if (departmentId !== undefined) patch.department_id = departmentId;
+  if (barangayId !== undefined) patch.barangay_id = barangayId;
+  if (isActive !== undefined) patch.is_active = isActive;
+  const { error } = await supabase
+    .from("users")
+    .update(patch)
+    .eq("id", userId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/users");
+  return { ok: true };
+}
+
+export async function toggleUserActive(
+  userId: string,
+  isActive: boolean
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("users")
+    .update({ is_active: isActive })
+    .eq("id", userId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/users");
+  return { ok: true };
+}
+
+export type BulkUserAction =
+  | "approve"
+  | "reject"
+  | "suspend"
+  | "restore"
+  | "delete";
+
+/**
+ * Apply a bulk action to many users at once (Users & Accounts checkboxes).
+ *
+ * Safety rails:
+ *  - the acting admin is always skipped (can't suspend/delete themselves)
+ *  - delete removes the auth user via service role (cascades the profile
+ *    through the FK), plus the profile row for legacy data
+ *  - every action notifies the affected citizen where it makes sense
+ */
+export async function bulkUserAction(
+  userIds: string[],
+  action: BulkUserAction,
+  reason = ""
+): Promise<ActionResult & { affected?: number }> {
+  const admin = await requireAdmin();
+  const supabase = await createClient();
+  const ids = userIds.filter((id) => id !== admin.id); // never act on self
+  if (ids.length === 0) return { ok: false, error: "No selectable users in that set." };
+
+  if (action === "approve" || action === "reject") {
+    const patch =
+      action === "approve"
+        ? {
+            verification_status: "verified",
+            verified_at: new Date().toISOString(),
+            verified_by: admin.id,
+            rejection_reason: null,
+          }
+        : {
+            verification_status: "rejected",
+            verified_at: new Date().toISOString(),
+            verified_by: admin.id,
+            rejection_reason: reason || "Registration could not be approved",
+          };
+    const { error } = await supabase.from("users").update(patch).in("id", ids);
+    if (error) return { ok: false, error: error.message };
+
+    await supabase.from("notifications").insert(
+      ids.map((id) => ({
+        user_id: id,
+        title: action === "approve" ? "Registration approved" : "Registration not approved",
+        body:
+          action === "approve"
+            ? "Welcome! Your account is approved — you can now sign in and submit reports."
+            : reason ||
+              "Your registration was rejected. Please contact the municipal office for assistance.",
+        type: "status_change",
+      }))
+    );
+  } else if (action === "suspend" || action === "restore") {
+    const { error } = await supabase
+      .from("users")
+      .update({ is_active: action === "restore" })
+      .in("id", ids);
+    if (error) return { ok: false, error: error.message };
+  } else if (action === "delete") {
+    // delete auth users first (cascades to profiles via FK) using service role
+    const adminClient = createAdminClient();
+    for (const id of ids) {
+      const { error: authErr } = await adminClient.auth.admin.deleteUser(id);
+      if (authErr) {
+        // auth user may not exist (legacy row) — fall back to profile delete
+        const { error: profErr } = await supabase.from("users").delete().eq("id", id);
+        if (profErr) return { ok: false, error: profErr.message };
+      }
+    }
+  }
+
+  revalidatePath("/dashboard/users");
+  return { ok: true, affected: ids.length };
+}
+
+/* ------------------------------ notifications ------------------------------ */
+
+export async function notifyAdminsOfUrgent(
+  reportId: string,
+  refCode: string,
+  title: string
+): Promise<ActionResult> {
+  const supabase = await createClient();
+  const profile = await requireProfile();
+  if (profile.role !== "citizen") return { ok: false };
+
+  const { data: admins } = await supabase
+    .from("users")
+    .select("id")
+    .eq("role", "admin");
+
+  if (admins?.length) {
+    await supabase.from("notifications").insert(
+      (admins as { id: string }[]).map((a) => ({
+        user_id: a.id,
+        report_id: reportId,
+        title: `Urgent report — ${refCode}`,
+        body: title,
+        type: "urgent",
+      }))
+    );
+  }
+  return { ok: true };
+}
+
+/* ------------------------------ settings ------------------------------ */
+
+export async function saveSettings(
+  entries: { key: string; value: string }[]
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  for (const e of entries) {
+    const { error } = await supabase
+      .from("app_settings")
+      .upsert({ key: e.key, value: e.value });
+    if (error) return { ok: false, error: error.message };
+  }
+  revalidatePath("/dashboard/settings");
+  return { ok: true };
+}
