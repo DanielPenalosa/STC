@@ -10,6 +10,8 @@ import ReportActions from "./actions";
 import HeaderActions from "./header-actions";
 import AiCard from "./ai-card";
 import ActivityLog from "./timeline";
+import DuplicatesCard from "./duplicates-card";
+import type { ReportDuplicate } from "@/lib/types";
 
 export default async function ReportDetailPage({
   params,
@@ -56,7 +58,7 @@ export default async function ReportDetailPage({
 
   if (!report) notFound();
 
-  const [photosRes, historyRes, assignmentRes, aiRes] = await Promise.all([
+  const [photosRes, historyRes, assignmentRes, aiRes, dupRes] = await Promise.all([
     supabase.from("report_photos").select("*").eq("report_id", report.id).order("created_at"),
     supabase.from("status_history").select("*").eq("report_id", report.id).order("created_at"),
     supabase.from("assignments").select("*").eq("report_id", report.id).order("created_at"),
@@ -67,7 +69,29 @@ export default async function ReportDetailPage({
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // duplicate evidence (admins only — RLS restricts the table to admins +
+    // report viewers, but the card is an admin triage tool)
+    profile.role === "admin" && report.is_possible_duplicate
+      ? supabase.from("report_duplicates").select("*").eq("report_id", report.id)
+      : Promise.resolve({ data: [] as ReportDuplicate[] }),
   ]);
+
+  // resolve the suspected originals for display
+  let duplicates: ReportDuplicate[] = [];
+  let similar: Record<string, { ref_code: string; title: string; status: string }> = {};
+  if (profile.role === "admin" && Array.isArray(dupRes.data) && dupRes.data.length) {
+    duplicates = dupRes.data as unknown as ReportDuplicate[];
+    const ids = Array.from(new Set(duplicates.map((d) => d.similar_report_id)));
+    const { data: simRows } = await supabase
+      .from("reports")
+      .select("id, ref_code, title, status")
+      .in("id", ids);
+    similar = Object.fromEntries(
+      ((simRows as unknown as { id: string; ref_code: string; title: string; status: string }[]) ?? []).map(
+        (r) => [r.id, { ref_code: r.ref_code, title: r.title, status: r.status }]
+      )
+    );
+  }
 
   const photos = (photosRes.data as unknown as ReportPhoto[]) ?? [];
   const history = (historyRes.data as unknown as { id: string; from_status: string | null; to_status: string; note: string | null; created_at: string }[]) ?? [];
@@ -163,6 +187,13 @@ export default async function ReportDetailPage({
         <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm font-medium text-success-700">
           <Icon name="shield" size="md" />
           This report is closed and locked. No further status updates can be made.
+        </div>
+      )}
+
+      {/* duplicate-review card (admin, when flagged) */}
+      {profile.role === "admin" && duplicates.length > 0 && (
+        <div className="mb-4">
+          <DuplicatesCard reportId={report.id} evidence={duplicates} similar={similar} />
         </div>
       )}
 

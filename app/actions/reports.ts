@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/data";
 import { runAiAnalysis } from "@/lib/ai";
+import { detectDuplicates } from "@/lib/ai/duplicate";
 import { resolveBarangay } from "@/lib/detect-server";
 import type { Report, ReportPhoto } from "@/lib/types";
 import type { ReportStatus } from "@/lib/constants";
@@ -22,6 +23,7 @@ export type NewReportInput = {
   longitude: number | null;
   addressText: string | null;
   photoPaths: string[]; // storage paths already uploaded client-side
+  photoHashes?: string[]; // sha-256 per photo (same order) for duplicate detection
 };
 
 export async function createReport(
@@ -69,10 +71,11 @@ export async function createReport(
   const reportId = data.id as string;
 
   if (input.photoPaths.length) {
-    const rows = input.photoPaths.map((p) => ({
+    const rows = input.photoPaths.map((p, i) => ({
       report_id: reportId,
       storage_path: p,
       kind: "citizen",
+      ...(input.photoHashes?.[i] ? { content_hash: input.photoHashes[i] } : {}),
     }));
     await supabase.from("report_photos").insert(rows);
   }
@@ -89,6 +92,18 @@ export async function createReport(
 
   // fire-and-forget AI analysis (recommendation only)
   void runAiAnalysis(reportId);
+
+  // fire-and-forget duplicate detection — flags the report + notifies admins
+  // when it looks like a copy; never blocks the submission
+  void detectDuplicates(supabase, reportId, {
+    title: input.title,
+    description: input.description,
+    categoryId: input.categoryId,
+    latitude: input.latitude,
+    longitude: input.longitude,
+    barangayId,
+    photoHashes: input.photoHashes ?? [],
+  });
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/reports");

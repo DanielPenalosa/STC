@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyUserIdPhoto } from "@/lib/ai/dispatch";
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
@@ -7,14 +8,17 @@ const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", 
 
 /**
  * POST /api/upload-id — uploads the citizen's ID photo to the PRIVATE
- * `verification-ids` bucket from the server, using the caller's session.
+ * `verification-ids` bucket from the server.
  *
- * Registration used to upload this straight from the browser, which required a
- * storage RLS policy on the bucket — deployments whose policies were missing or
- * drifted failed with "new row violates row-level security policy". Uploading
- * server-side with the authenticated user removes that dependency entirely.
+ * The write itself uses the service-role client AFTER the caller's session is
+ * verified, so registration no longer depends on any storage RLS policy being
+ * present on the deployment (missing/drifted policies caused "new row
+ * violates row-level security policy"). Security is enforced HERE, in code:
+ *   - a valid authenticated session is required
+ *   - the file can only land under the caller's own user-id folder
+ *   - size/type limits are enforced before any write
  *
- * Files are namespaced under the caller's own user-id folder and upserted, so
+ * Files are namespaced under the caller's user-id folder and upserted, so
  * re-registering/retaking the photo overwrites the previous one.
  */
 export async function POST(request: Request) {
@@ -28,6 +32,7 @@ export async function POST(request: Request) {
         { status: 401 }
       );
     }
+    const adminStorage = createAdminClient().storage;
 
     const form = await request.formData();
     const file = form.get("file");
@@ -53,7 +58,8 @@ export async function POST(request: Request) {
     const ext = (file.name.split(".").pop() ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
     const path = `${uid}/id-card.${ext || "jpg"}`;
 
-    const { error } = await supabase.storage
+    // service-role write — RLS-independent; access control happened above
+    const { error } = await adminStorage
       .from("verification-ids")
       .upload(path, file, { contentType: file.type || "image/jpeg", upsert: true });
     if (error) throw error;

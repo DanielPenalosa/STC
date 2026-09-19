@@ -205,6 +205,65 @@ export async function reassignReport(
 
 /* ------------------------------ AI ------------------------------ */
 
+/**
+ * Dismiss the possible-duplicate flag on a report — an admin has reviewed
+ * the evidence and decided it's a distinct issue.
+ */
+export async function dismissDuplicateFlag(reportId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("reports")
+    .update({ is_possible_duplicate: false })
+    .eq("id", reportId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/reports");
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true };
+}
+
+/**
+ * Mark `reportId` as a duplicate of `originalId`: close it with a note
+ * pointing at the original and remove the flag. The original keeps
+ * receiving updates; reporters of the closed copy are pointed there.
+ */
+export async function markAsDuplicate(
+  reportId: string,
+  originalId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  if (reportId === originalId)
+    return { ok: false, error: "A report cannot be a duplicate of itself." };
+
+  const { data: original } = await supabase
+    .from("reports")
+    .select("ref_code, title")
+    .eq("id", originalId)
+    .maybeSingle();
+  if (!original) return { ok: false, error: "Original report not found." };
+
+  // close the copy with an explanatory note (records status history + notifies)
+  const { error: upErr } = await supabase
+    .from("reports")
+    .update({ status: "closed", is_possible_duplicate: false })
+    .eq("id", reportId);
+  if (upErr) return { ok: false, error: upErr.message };
+
+  await supabase.from("status_history").insert({
+    report_id: reportId,
+    from_status: "submitted",
+    to_status: "closed",
+    note: `Marked as duplicate of ${original.ref_code} — "${original.title}".`,
+  });
+
+  revalidatePath("/dashboard/reports");
+  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/reports/${originalId}`);
+  return { ok: true };
+}
+
 export async function overrideAi(
   reportId: string,
   patch: {
@@ -444,34 +503,59 @@ export async function verifyCitizen(userId: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+/**
+ * Remove a citizen's registration completely: the auth account, the profile
+ * row (FK cascade removes their notifications and other references), the
+ * uploaded ID photo from storage, and the admins' "pending approval"
+ * notifications about them. Used for REJECTED registrations — the applicant
+ * can re-register cleanly with the same email if they fix their ID.
+ */
+async function purgeRegistration(userId: string): Promise<ActionResult> {
+  const adminClient = createAdminClient();
+
+  // 1. grab the ID path before the profile row disappears
+  const { data: row } = await adminClient
+    .from("users")
+    .select("id_photo_path, verification_status")
+    .eq("id", userId)
+    .maybeSingle();
+  const idPath = (row as { id_photo_path?: string | null } | null)?.id_photo_path ?? null;
+
+  // 2. delete the auth user (cascades: users row, notifications, etc.)
+  const { error: authErr } = await adminClient.auth.admin.deleteUser(userId);
+  if (authErr) {
+    // auth user may already be gone (legacy row) — fall back to profile delete
+    const { error: profErr } = await adminClient.from("users").delete().eq("id", userId);
+    if (profErr) return { ok: false, error: profErr.message };
+  }
+
+  // 3. best-effort: remove the ID photo from private storage
+  if (idPath) {
+    await adminClient.storage.from("verification-ids").remove([idPath]).catch(() => {});
+  }
+
+  // 4. clean up the admins' "new registration" notifications for this user
+  //    (auth cascade removes the applicant's own notifications; these point
+  //    AT them from admins and survive)
+  await adminClient
+    .from("notifications")
+    .delete()
+    .eq("type", "registration")
+    .ilike("body", `%${userId}%`);
+
+  return { ok: true };
+}
+
 export async function rejectCitizen(
   userId: string,
   reason: string
 ): Promise<ActionResult> {
-  const admin = await requireAdmin();
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("users")
-    .update({
-      verification_status: "rejected",
-      verified_at: new Date().toISOString(),
-      verified_by: admin.id,
-      rejection_reason: reason || "ID could not be validated",
-    })
-    .eq("id", userId);
-  if (error) return { ok: false, error: error.message };
+  await requireAdmin();
 
-  await supabase.from("notifications").insert({
-    user_id: userId,
-    title: "Registration not approved",
-    body:
-      reason ||
-      "Your registration was rejected. Please contact the municipal office for assistance.",
-    type: "status_change",
-  });
-  revalidatePath("/dashboard/verification");
-  revalidatePath("/dashboard/users");
-  return { ok: true };
+  // rejected registrations are removed entirely — the applicant sees the
+  // rejection reason at sign-in until the account is gone, then can simply
+  // re-register with a valid ID
+  return purgeRegistration(userId);
 }
 
 /** Signed URL for a citizen's ID photo — admins only, short-lived. */
@@ -550,36 +634,32 @@ export async function bulkUserAction(
   const ids = userIds.filter((id) => id !== admin.id); // never act on self
   if (ids.length === 0) return { ok: false, error: "No selectable users in that set." };
 
-  if (action === "approve" || action === "reject") {
-    const patch =
-      action === "approve"
-        ? {
-            verification_status: "verified",
-            verified_at: new Date().toISOString(),
-            verified_by: admin.id,
-            rejection_reason: null,
-          }
-        : {
-            verification_status: "rejected",
-            verified_at: new Date().toISOString(),
-            verified_by: admin.id,
-            rejection_reason: reason || "Registration could not be approved",
-          };
-    const { error } = await supabase.from("users").update(patch).in("id", ids);
+  if (action === "approve") {
+    const { error } = await supabase
+      .from("users")
+      .update({
+        verification_status: "verified",
+        verified_at: new Date().toISOString(),
+        verified_by: admin.id,
+        rejection_reason: null,
+      })
+      .in("id", ids);
     if (error) return { ok: false, error: error.message };
 
     await supabase.from("notifications").insert(
       ids.map((id) => ({
         user_id: id,
-        title: action === "approve" ? "Registration approved" : "Registration not approved",
-        body:
-          action === "approve"
-            ? "Welcome! Your account is approved — you can now sign in and submit reports."
-            : reason ||
-              "Your registration was rejected. Please contact the municipal office for assistance.",
+        title: "Registration approved",
+        body: "Welcome! Your account is approved — you can now sign in and submit reports.",
         type: "status_change",
       }))
     );
+  } else if (action === "reject") {
+    // bulk reject = full removal, same as the single reject action
+    for (const id of ids) {
+      const res = await purgeRegistration(id);
+      if (!res.ok) return res;
+    }
   } else if (action === "suspend" || action === "restore") {
     const { error } = await supabase
       .from("users")

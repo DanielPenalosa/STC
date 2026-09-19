@@ -62,10 +62,28 @@ export async function registerCitizen(
   }
   if (!data.user) return { ok: false, error: "Registration failed — try again." };
 
-  // mark the account as awaiting verification. Uses the service-role client so
-  // this works even when email confirmation is ON and no session exists yet.
-  // (verification columns are admin-locked afterwards by the DB trigger)
+  // Write the profile fields DIRECTLY with the service role, so name, email
+  // and phone are saved even when the live database's on-signup trigger is
+  // missing or an older version (the trigger remains as a fast path when
+  // correct). Upsert to survive a failed/absent trigger row.
   const admin = createAdminClient();
+  const { error: profileErr } = await admin.from("users").upsert({
+    id: data.user.id,
+    email: input.email.trim().toLowerCase(),
+    full_name: input.fullName.trim(),
+    phone: input.phone.trim() || null,
+    role: "citizen",
+  });
+  if (profileErr) {
+    // the auth account exists — surface a precise, actionable error
+    return {
+      ok: false,
+      error: `Account created but the profile could not be saved (${profileErr.message}). Contact the administrator.`,
+    };
+  }
+
+  // mark the account as awaiting verification (service role — no session yet
+  // when email confirmation is on; columns are admin-locked afterwards)
   await admin
     .from("users")
     .update({ verification_status: "pending" })
@@ -82,10 +100,11 @@ export async function registerCitizen(
 
 /**
  * Record the storage path of the citizen's uploaded ID photo.
- * The actual file upload happens in the browser (no size limits); this small
- * server action just saves the reference. Owners may set their own path while
- * verification is still pending or rejected — the DB trigger locks it once
- * verified.
+ * The actual file upload happens in /api/upload-id (service-role write);
+ * this small server action just saves the reference. Like the upload, the
+ * write uses the service role AFTER validating the caller's session and
+ * path ownership — so a missing/drifted RLS policy can never silently drop
+ * the reference.
  */
 export async function saveIdPhotoPath(path: string): Promise<ActionResult> {
   const supabase = await createClient();
@@ -96,7 +115,8 @@ export async function saveIdPhotoPath(path: string): Promise<ActionResult> {
   if (!path.startsWith(`${auth.user.id}/`))
     return { ok: false, error: "Invalid ID photo path." };
 
-  const { error } = await supabase
+  const admin = createAdminClient();
+  const { error } = await admin
     .from("users")
     .update({ id_photo_path: path })
     .eq("id", auth.user.id);

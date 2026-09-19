@@ -107,6 +107,7 @@ create table if not exists public.reports (
   latitude      double precision,
   longitude     double precision,
   address_text  text,
+  is_possible_duplicate boolean not null default false,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
@@ -124,8 +125,12 @@ create table if not exists public.report_photos (
   storage_path text not null,
   kind         text not null default 'citizen' check (kind in ('citizen','resolution')),
   caption      text,
+  content_hash text,
   created_at   timestamptz not null default now()
 );
+create index if not exists report_photos_hash_idx
+  on public.report_photos (content_hash)
+  where content_hash is not null;
 
 -- assignments (to department or barangay; keep latest per report)
 create table if not exists public.assignments (
@@ -186,6 +191,20 @@ create table if not exists public.ai_analysis (
                             check (status in ('pending','completed','low_confidence','reviewed','failed')),
   created_at              timestamptz not null default now()
 );
+
+-- report_duplicates (duplicate-report detection evidence)
+create table if not exists public.report_duplicates (
+  id            uuid primary key default gen_random_uuid(),
+  report_id     uuid not null references public.reports(id) on delete cascade,
+  similar_report_id uuid not null references public.reports(id) on delete cascade,
+  signal        text not null check (signal in ('photo','text','location','category')),
+  score         double precision not null check (score between 0 and 1),
+  details       jsonb not null default '{}'::jsonb,
+  created_at    timestamptz not null default now(),
+  unique (report_id, similar_report_id, signal)
+);
+create index if not exists report_duplicates_report_idx
+  on public.report_duplicates (report_id);
 
 -- locations (reverse-geocoded place metadata per report)
 create table if not exists public.locations (

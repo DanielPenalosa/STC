@@ -87,6 +87,7 @@ export type Report = {
   latitude: number | null;
   longitude: number | null;
   address_text: string | null;
+  is_possible_duplicate?: boolean;
   created_at: string;
   updated_at: string;
   // joined helpers
@@ -102,6 +103,17 @@ export type ReportPhoto = {
   storage_path: string;
   kind: "citizen" | "resolution";
   caption: string | null;
+  content_hash?: string | null;
+  created_at: string;
+};
+
+export type ReportDuplicate = {
+  id: string;
+  report_id: string;
+  similar_report_id: string;
+  signal: "photo" | "text" | "location" | "category";
+  score: number;
+  details: Record<string, unknown>;
   created_at: string;
 };
 

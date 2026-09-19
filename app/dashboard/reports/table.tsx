@@ -153,6 +153,16 @@ export default function ReportsTable({
                         <PriorityBadge priority={r.priority} />
                       </span>
                     )}
+                    {r.is_possible_duplicate && (
+                      <span
+                        className="ml-1 inline-block align-middle"
+                        title="Possible duplicate — review before triaging"
+                      >
+                        <span className="inline-flex items-center gap-1 rounded-full bg-warn-50 px-2 py-0.5 text-[10px] font-bold text-warn-700 ring-1 ring-warn-200">
+                          <Icon name="alert" size="sm" /> dup?
+                        </span>
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <span
@@ -262,7 +272,14 @@ export default function ReportsTable({
               {/* ref + status */}
               <div className="flex items-center justify-between gap-2">
                 <p className="font-mono text-sm font-bold text-primary-700">{active.ref_code}</p>
-                <StatusBadge status={active.status} />
+                <div className="flex items-center gap-1.5">
+                  {active.is_possible_duplicate && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-warn-50 px-2 py-0.5 text-[10px] font-bold text-warn-700 ring-1 ring-warn-200">
+                      <Icon name="alert" size="sm" /> Possible duplicate
+                    </span>
+                  )}
+                  <StatusBadge status={active.status} />
+                </div>
               </div>
 
               {/* location + map link */}

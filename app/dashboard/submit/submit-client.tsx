@@ -9,6 +9,14 @@ import { Icon } from "@/components/icons";
 
 type Opt = { id: string; name: string };
 
+/** SHA-256 of file bytes, hex — used for duplicate-photo detection. */
+async function sha256Hex(buf: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 type DetectionState =
   | { phase: "idle" }
   | { phase: "locating" }
@@ -222,6 +230,7 @@ export default function SubmitReportClient({
     setError(null);
     try {
       const photoPaths: string[] = [];
+      const photoHashes: string[] = [];
       const { data: userData } = await supabase.auth.getUser();
       const uid = userData.user?.id ?? "anon";
       for (const f of files) {
@@ -231,6 +240,7 @@ export default function SubmitReportClient({
           .upload(path, f, { contentType: f.type });
         if (upErr) throw upErr;
         photoPaths.push(path);
+        photoHashes.push(await sha256Hex(await f.arrayBuffer()));
       }
 
       const res = await createReport({
@@ -241,6 +251,7 @@ export default function SubmitReportClient({
         longitude: coords?.lng ?? null,
         addressText: addressText || null,
         photoPaths,
+        photoHashes,
       });
       if (!res.ok) throw new Error(res.error ?? "Failed to submit report");
 
