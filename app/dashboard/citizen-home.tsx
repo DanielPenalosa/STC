@@ -24,9 +24,7 @@ export default async function CitizenHome({ profile }: { profile: Profile }) {
 
   const photoUrl = (r: (typeof reports)[number]) => {
     const p = r.report_photos?.find((x) => x.kind === "citizen");
-    return p
-      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/report-photos/${p.storage_path}`
-      : null;
+    return p ? `/api/photo?bucket=report-photos&path=${encodeURIComponent(p.storage_path)}` : null;
   };
 
   const active = reports.filter(

@@ -45,9 +45,10 @@ Deno.serve(async (req: Request) => {
 
     /* -------- precheck mode: { photoPath, description } -------- */
     if (!body.reportId && body.photoPath) {
-      const photoUrl = supabase.storage
-        .from("report-photos")
-        .getPublicUrl(body.photoPath).data.publicUrl;
+      // signed URL works on both public and private buckets (service role)
+      const photoUrl = (
+        await supabase.storage.from("report-photos").createSignedUrl(body.photoPath, 600)
+      ).data?.signedUrl ?? null;
       const { categories } = await loadCategories(supabase);
       const result = await runVision({ imageUrl: photoUrl, context: body.description ?? "", categories });
 
@@ -96,7 +97,11 @@ Deno.serve(async (req: Request) => {
       .eq("report_id", reportId)
       .eq("kind", "citizen");
     const photoUrl = photos?.[0]
-      ? supabase.storage.from("report-photos").getPublicUrl(photos[0].storage_path).data.publicUrl
+      ? (
+          await supabase.storage
+            .from("report-photos")
+            .createSignedUrl(photos[0].storage_path, 600)
+        ).data?.signedUrl ?? null
       : null;
 
     const { categories } = await loadCategories(supabase);

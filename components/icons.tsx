@@ -48,7 +48,10 @@ export type IconName =
   | "globe"
   | "mail"
   | "lock"
-  | "eye-off";
+  | "eye-off"
+  | "calendar"
+  | "trend-up"
+  | "trend-down";
 
 const PATHS: Record<IconName, ReactNode> = {
   grid: (
@@ -243,6 +246,24 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M6.61 6.61A13.5 13.5 0 0 0 1 12s4 8 11 8a9.74 9.74 0 0 0 5.39-1.61" />
       <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
       <path d="M1 1l22 22" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" />
+    </>
+  ),
+  "trend-up": (
+    <>
+      <path d="M22 7l-8.5 8.5-5-5L2 17" />
+      <path d="M16 7h6v6" />
+    </>
+  ),
+  "trend-down": (
+    <>
+      <path d="M22 17l-8.5-8.5-5 5L2 7" />
+      <path d="M16 17h6v-6" />
     </>
   ),
 };

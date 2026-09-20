@@ -7,6 +7,7 @@ import {
   updateReportStatus,
   addProgressNote,
   deleteMyReport,
+  uploadEvidencePhoto,
 } from "@/app/actions/reports";
 import { btn, inputCls } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -61,7 +62,7 @@ export default function ReportActions({
   isOwner: boolean;
 }) {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = createClient(); // still used for browser auth checks
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState("");
@@ -84,23 +85,13 @@ export default function ReportActions({
   if (!isStaff && !showCitizen) return null;
 
   async function uploadEvidence(file: File) {
+    // goes through the server action — service-role storage write + catalog
+    // row, so evidence never silently vanishes on drifted DB policies
     setEvidenceBusy(true);
     setError(null);
-    const ext = file.name.split(".").pop() ?? "jpg";
-    const path = `${reportId}/res-${Date.now()}.${ext}`;
-    const { error: upErr } = await supabase.storage
-      .from("report-photos")
-      .upload(path, file, { contentType: file.type });
-    if (!upErr) {
-      await supabase.from("report_photos").insert({
-        report_id: reportId,
-        storage_path: path,
-        kind: "resolution",
-      });
-      router.refresh();
-    } else {
-      setError(upErr.message);
-    }
+    const res = await uploadEvidencePhoto(reportId, file);
+    if (!res.ok) setError(res.error ?? "Upload failed");
+    else router.refresh();
     setEvidenceBusy(false);
   }
 

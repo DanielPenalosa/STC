@@ -23,11 +23,9 @@ export type HistoryEntry = {
 
 const PAGE_SIZE = 10;
 
-/** Client-safe photo URL (mirrors lib/data.publicPhotoUrl without server imports). */
+/** Client-safe photo URL — served by the authenticated /api/photo proxy. */
 function photoUrl(path: string): string {
-  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!base) return "";
-  return `${base}/storage/v1/object/public/report-photos/${path}`;
+  return `/api/photo?bucket=report-photos&path=${encodeURIComponent(path)}`;
 }
 
 const STEP_LABELS: Record<string, string> = {

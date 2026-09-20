@@ -231,14 +231,18 @@ export default function SubmitReportClient({
     try {
       const photoPaths: string[] = [];
       const photoHashes: string[] = [];
-      const { data: userData } = await supabase.auth.getUser();
-      const uid = userData.user?.id ?? "anon";
       for (const f of files) {
-        const path = `pending/${uid}/${Date.now()}-${f.name}`;
-        const { error: upErr } = await supabase.storage
-          .from("report-photos")
-          .upload(path, f, { contentType: f.type });
-        if (upErr) throw upErr;
+        // service-role upload via server route — policy drift on the live DB
+        // can no longer make photos vanish between upload and admin view
+        const path = `pending/${Date.now()}-${f.name}`;
+        const fd = new FormData();
+        fd.append("file", f);
+        fd.append("path", path);
+        const upRes = await fetch("/api/upload-photo", { method: "POST", body: fd });
+        const upJson = await upRes.json().catch(() => ({}));
+        if (!upRes.ok || !upJson.ok) {
+          throw new Error(upJson.error ?? "Photo upload failed");
+        }
         photoPaths.push(path);
         photoHashes.push(await sha256Hex(await f.arrayBuffer()));
       }

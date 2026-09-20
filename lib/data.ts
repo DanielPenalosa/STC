@@ -74,9 +74,9 @@ export async function getAppMeta(): Promise<AppMeta> {
   };
 }
 
-/** Build a signed URL for a photo stored in Supabase Storage. */
-export function publicPhotoUrl(path: string): string {
-  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!base) return "";
-  return `${base}/storage/v1/object/public/report-photos/${path}`;
-}
+/**
+ * URL for a report photo, served through the authenticated /api/photo proxy.
+ * Works regardless of bucket policies/public flags on the database.
+ * (Implementation lives in lib/photo.ts — client-safe.)
+ */
+export { publicPhotoUrl, idPhotoUrl } from "@/lib/photo";

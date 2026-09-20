@@ -8,10 +8,10 @@ import {
   toggleUserActive,
   verifyCitizen,
   rejectCitizen,
-  getIdPhotoUrl,
   bulkUserAction,
   type BulkUserAction,
 } from "@/app/actions/admin";
+import { idPhotoUrl } from "@/lib/photo";
 import { Card, btn, inputCls, labelCls } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { ROLE_LABELS } from "@/lib/constants";
@@ -60,7 +60,6 @@ export default function UserManager({
   const [rejecting, setRejecting] = useState<Profile | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [idUrl, setIdUrl] = useState<string | null>(null);
-  const [idLoading, setIdLoading] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkReason, setBulkReason] = useState<string | null>(null); // holds action pending a reason
@@ -133,11 +132,8 @@ export default function UserManager({
 
   async function openId(u: Profile) {
     if (!u.id_photo_path) return;
-    setIdLoading(u.id);
-    const res = await getIdPhotoUrl(u.id_photo_path);
-    setIdLoading(null);
-    if (res.ok && res.url) setIdUrl(res.url);
-    else setError(res.error ?? "Could not load ID photo");
+    // served by /api/photo (admin-checked server route) — no signed-URL/policy dependency
+    setIdUrl(idPhotoUrl(u.id_photo_path));
   }
 
   async function onCreateStaff(e: React.FormEvent<HTMLFormElement>) {
@@ -440,7 +436,7 @@ export default function UserManager({
                     title="View the uploaded ID photo"
                   >
                     <Icon name="eye" size="sm" />
-                    {idLoading === u.id ? "Loading…" : "View ID"}
+                    View ID
                   </button>
                   <button
                     onClick={() => void run(() => verifyCitizen(u.id))}
@@ -542,7 +538,7 @@ export default function UserManager({
                               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                             >
                               <Icon name="eye" size="sm" />
-                              {idLoading === u.id ? "…" : "ID"}
+                              ID
                             </button>
                           )}
                           <button

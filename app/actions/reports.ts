@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireProfile } from "@/lib/data";
 import { runAiAnalysis } from "@/lib/ai";
 import { detectDuplicates } from "@/lib/ai/duplicate";
@@ -71,13 +72,19 @@ export async function createReport(
   const reportId = data.id as string;
 
   if (input.photoPaths.length) {
+    // service-role insert — the storage upload happened with the user's
+    // session, but the catalog row must never silently fail on drifted
+    // policies (missing rows are why admins saw reports without photos)
     const rows = input.photoPaths.map((p, i) => ({
       report_id: reportId,
       storage_path: p,
       kind: "citizen",
       ...(input.photoHashes?.[i] ? { content_hash: input.photoHashes[i] } : {}),
     }));
-    await supabase.from("report_photos").insert(rows);
+    const { error: photosError } = await createAdminClient()
+      .from("report_photos")
+      .insert(rows);
+    if (photosError) console.error("report_photos insert failed:", photosError.message);
   }
 
   // location snapshot
@@ -270,14 +277,17 @@ export async function uploadEvidencePhoto(
 
   const ext = file.name.split(".").pop() ?? "jpg";
   const path = `${reportId}/res-${Date.now()}.${ext}`;
-  const { error } = await supabase.storage
+  // service-role write — evidence rows must never silently fail on policy drift
+  const { error } = await createAdminClient()
+    .storage
     .from("report-photos")
     .upload(path, file, { contentType: file.type });
   if (error) return { ok: false, error: error.message };
 
-  await supabase
+  const { error: rowErr } = await createAdminClient()
     .from("report_photos")
     .insert({ report_id: reportId, storage_path: path, kind: "resolution" });
+  if (rowErr) console.error("report_photos insert failed:", rowErr.message);
 
   revalidatePath(`/reports/${reportId}`);
   return { ok: true };
