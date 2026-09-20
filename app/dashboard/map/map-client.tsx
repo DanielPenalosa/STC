@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import dynamic from "next/dynamic";
-import { Icon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
+import { STATUS_LABELS } from "@/lib/constants";
 import type { FullMapHandle, FullMapPoint } from "@/components/full-report-map";
 import type { ReportStatus } from "@/lib/constants";
 
@@ -23,24 +25,46 @@ export type MapReport = {
   priority: string;
   latitude: number | null;
   longitude: number | null;
+  created_at: string;
+  category_id: string | null;
   category_name: string | null;
   category_color: string | null;
   category_icon: string | null;
+  barangay_id: string | null;
   barangay_name: string | null;
+  photo_url: string | null;
 };
 
-const LEGEND: { key: string; label: string; color: string }[] = [
-  { key: "submitted", label: "Pending", color: "#64748b" },
+const STATUS_LEGEND: { key: ReportStatus; label: string; color: string }[] = [
+  { key: "submitted", label: "Pending", color: "#94a3b8" },
   { key: "under_review", label: "Under Review", color: "#F5E606" },
   { key: "verified", label: "Verified", color: "#06ABEA" },
   { key: "assigned", label: "Assigned", color: "#2333A0" },
-  { key: "in_progress", label: "In Progress", color: "#06ABEA" },
+  { key: "in_progress", label: "In Progress", color: "#eab308" },
   { key: "resolved", label: "Resolved", color: "#2E8254" },
   { key: "closed", label: "Closed", color: "#334155" },
 ];
 
 const statusColor = (s: string) =>
-  LEGEND.find((l) => l.key === s)?.color ?? "#2333A0";
+  STATUS_LEGEND.find((l) => l.key === s)?.color ?? "#2333A0";
+
+function timeAgo(iso: string): string {
+  const s = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d ago`;
+  return new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric" }).format(new Date(iso));
+}
+
+const STATUS_TILE: Record<ReportStatus, { bg: string; text: string }> = {
+  submitted: { bg: "bg-slate-100", text: "text-slate-600" },
+  under_review: { bg: "bg-warn-50", text: "text-warn-700" },
+  verified: { bg: "bg-accent-50", text: "text-accent-700" },
+  assigned: { bg: "bg-primary-50", text: "text-primary-700" },
+  in_progress: { bg: "bg-warn-50", text: "text-warn-700" },
+  resolved: { bg: "bg-success-50", text: "text-success-700" },
+  closed: { bg: "bg-slate-100", text: "text-slate-500" },
+};
 
 export default function MapClient({
   reports,
@@ -51,12 +75,12 @@ export default function MapClient({
   categories: { id: string; name: string; icon: string }[];
   barangays: { id: string; name: string }[];
 }) {
-  const [status, setStatus] = useState("all");
-  const [barangay, setBarangay] = useState("all");
   const [category, setCategory] = useState("all");
+  const [barangay, setBarangay] = useState("all");
+  const [status, setStatus] = useState("all");
   const [layer, setLayer] = useState<"street" | "satellite">("street");
   const [cluster, setCluster] = useState(true);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [hover, setHover] = useState<string | null>(null);
   const handleRef = useRef<FullMapHandle | null>(null);
 
   const filtered = useMemo(
@@ -66,8 +90,8 @@ export default function MapClient({
           r.latitude != null &&
           r.longitude != null &&
           (status === "all" || r.status === status) &&
-          (barangay === "all" || r.barangay_name === barangay) &&
-          (category === "all" || r.category_name === category)
+          (barangay === "all" || r.barangay_id === barangay) &&
+          (category === "all" || r.category_id === category)
       ),
     [reports, status, barangay, category]
   );
@@ -79,161 +103,235 @@ export default function MapClient({
     label: r.title,
     color: r.category_color ?? statusColor(r.status),
     status: r.status,
+    barangay: r.barangay_name ?? undefined,
+    photoUrl: r.photo_url,
   }));
 
-  /* statistics (computed from ALL reports, like the reference) */
-  const stats = useMemo(() => {
-    const byStatus = new Map<string, number>();
-    for (const r of reports) byStatus.set(r.status, (byStatus.get(r.status) ?? 0) + 1);
-    return [...byStatus.entries()].sort((a, b) => b[1] - a[1]);
+  /* category totals for the bottom cards (like the reference) */
+  const categoryStats = useMemo(() => {
+    const m = new Map<string, { name: string; color: string; n: number }>();
+    for (const r of reports) {
+      if (!r.category_name) continue;
+      const e = m.get(r.category_name) ?? {
+        name: r.category_name,
+        color: r.category_color ?? "#2333A0",
+        n: 0,
+      };
+      e.n += 1;
+      m.set(r.category_name, e);
+    }
+    return [...m.values()].sort((a, b) => b.n - a.n).slice(0, 5);
   }, [reports]);
 
+  function reset() {
+    setCategory("all");
+    setBarangay("all");
+    setStatus("all");
+  }
+
+  function locate(r: MapReport) {
+    setHover(r.id);
+    if (r.latitude != null && r.longitude != null) {
+      handleRef.current?.flyTo(r.latitude, r.longitude, 17);
+    }
+  }
+
   const selectCls =
-    "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-400 focus:outline-none";
+    "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-primary-400 focus:outline-none";
+
+  const recent = filtered.slice(0, 6);
 
   return (
-    <div className="space-y-3">
-      {/* filter bar */}
-      <div className="space-y-2">
-        {/* primary selects — full-width rows on phones */}
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:flex lg:flex-wrap">
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className={`${selectCls} w-full lg:w-auto`}>
-            <option value="all">Status · All</option>
-            {LEGEND.map((l) => (
-              <option key={l.key} value={l.key}>{l.label}</option>
-            ))}
-          </select>
-          <select value={barangay} onChange={(e) => setBarangay(e.target.value)} className={`${selectCls} w-full lg:w-auto`}>
-            <option value="all">Barangay · All</option>
-            {barangays.map((b) => (
-              <option key={b.id} value={b.name}>{b.name}</option>
-            ))}
-          </select>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className={`${selectCls} w-full lg:w-auto`}>
-            <option value="all">Category · All</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.name}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* view controls — full-width equal buttons on phones */}
-        <div className="grid grid-cols-3 gap-2 lg:ml-auto lg:flex lg:w-auto">
+    <div className="space-y-4">
+      {/* ===== toolbar: map/satellite + center + cluster ===== */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
           <button
-            onClick={() => setLayer((l) => (l === "street" ? "satellite" : "street"))}
-            className="press inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
-          >
-            <Icon name={layer === "street" ? "layers" : "globe"} size="sm" />
-            {layer === "street" ? "Street" : "Satellite"}
-          </button>
-          <button
-            onClick={() => handleRef.current?.fitAll()}
-            className="press inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
-          >
-            <Icon name="crosshair" size="sm" />
-            Center
-          </button>
-          <button
-            onClick={() => setCluster((c) => !c)}
-            className={`press inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm transition ${
-              cluster
-                ? "bg-royal text-white hover:bg-navy"
-                : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            onClick={() => setLayer("street")}
+            className={`press inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold transition ${
+              layer === "street" ? "bg-royal text-white" : "text-slate-600 hover:bg-slate-50"
             }`}
           >
-            <Icon name="grid" size="sm" />
-            Cluster
+            <Icon name="map" size="sm" /> Map
+          </button>
+          <button
+            onClick={() => setLayer("satellite")}
+            className={`press inline-flex items-center gap-1.5 border-l border-slate-200 px-3.5 py-2 text-sm font-semibold transition ${
+              layer === "satellite" ? "bg-royal text-white" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <Icon name="globe" size="sm" /> Satellite
           </button>
         </div>
+
+        <button
+          onClick={() => handleRef.current?.fitAll()}
+          className="press inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+          title="Fit all reports"
+        >
+          <Icon name="crosshair" size="sm" /> Center
+        </button>
+        <button
+          onClick={() => setCluster((c) => !c)}
+          className={`press inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold shadow-sm transition ${
+            cluster
+              ? "bg-royal text-white hover:bg-navy"
+              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <Icon name="grid" size="sm" /> Cluster
+        </button>
+        <span className="ml-auto hidden text-xs text-slate-400 sm:block">
+          {filtered.length} of {reports.length} reports shown
+        </span>
       </div>
 
-      {/* map + side panel */}
-      <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
-        <div className="relative h-[55vh] min-h-[340px] overflow-hidden rounded-xl border border-slate-200 shadow-sm sm:h-[65vh] lg:h-[70vh]">
-          <FullReportMap
-            points={points}
-            layer={layer}
-            cluster={cluster}
-            onReady={(h) => (handleRef.current = h)}
-          />
+      {/* ===== map + right sidebar (reference layout) ===== */}
+      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+        {/* --- map card --- */}
+        <div className="space-y-4">
+          <div className="relative h-[52vh] min-h-[340px] overflow-hidden rounded-xl border border-slate-200 shadow-sm sm:h-[62vh]">
+            <FullReportMap
+              points={points}
+              layer={layer}
+              cluster={cluster}
+              onReady={(h) => (handleRef.current = h)}
+            />
+          </div>
 
-          {/* statistics overlay */}
-          <div className="map-stats-card-sm absolute left-3 top-3 z-[500] w-52 rounded-xl border border-slate-100 bg-white/95 p-3.5 shadow-lg backdrop-blur">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Map Statistics</p>
-            <p className="mt-1 text-3xl font-extrabold tracking-tight text-slate-900">{reports.length}</p>
-            <p className="-mt-0.5 text-[11px] text-slate-400">Total Reports</p>
-            <div className="hide-sm mt-2.5 space-y-1 border-t border-slate-100 pt-2.5">
-              {stats.map(([s, n]) => (
-                <div key={s} className="flex items-center justify-between text-[11px]">
-                  <span className="flex items-center gap-1.5 capitalize text-slate-600">
-                    <span className="h-2 w-2 rounded-full" style={{ background: statusColor(s) }} />
-                    {s.replace(/_/g, " ")}
-                  </span>
-                  <span className="font-semibold text-slate-700">{n}</span>
-                </div>
-              ))}
-            </div>
+          {/* --- category stat cards (bottom of map, like reference) --- */}
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+            {categoryStats.map((c) => (
+              <button
+                key={c.name}
+                onClick={() => setCategory(category === c.name ? "all" : c.name)}
+                className={`press flex items-center gap-2.5 rounded-xl border bg-white px-3 py-2.5 text-left shadow-sm transition hover:shadow-md ${
+                  category === c.name ? "border-primary-300 ring-2 ring-primary-100" : "border-slate-200"
+                }`}
+              >
+                <span
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white"
+                  style={{ background: c.color }}
+                >
+                  <Icon name="pin" size="sm" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[11px] font-medium text-slate-500">{c.name}</span>
+                  <span className="block text-lg font-extrabold leading-tight text-slate-900">{c.n}</span>
+                </span>
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* right panel: legend + list */}
-        <div className="flex max-h-[60vh] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:max-h-[70vh]">
-          <div className="border-b border-slate-100 p-3">
-            <div className="flex flex-wrap gap-x-3 gap-y-1">
-              {LEGEND.map((l) => (
-                <span key={l.key} className="flex items-center gap-1 text-[11px] text-slate-500">
+        {/* --- right sidebar: filters + recent reports --- */}
+        <div className="space-y-4">
+          {/* filters */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="flex items-center gap-2 text-sm font-bold text-slate-800">
+              <Icon name="grid" size="md" className="text-primary-600" />
+              Report Filters
+            </p>
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Category</label>
+                <select value={category} onChange={(e) => setCategory(e.target.value)} className={selectCls}>
+                  <option value="all">All Categories</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Barangay</label>
+                <select value={barangay} onChange={(e) => setBarangay(e.target.value)} className={selectCls}>
+                  <option value="all">All Barangays</option>
+                  {barangays.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Status</label>
+                <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
+                  <option value="all">All Status</option>
+                  {STATUS_LEGEND.map((l) => (
+                    <option key={l.key} value={l.key}>{l.label}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={() => {
+                  /* filtering is instant; button kept for familiarity */
+                }}
+                className="press w-full rounded-lg bg-navy py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-royal"
+              >
+                Apply Filters
+              </button>
+              <button
+                onClick={reset}
+                className="press flex w-full items-center justify-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-600"
+              >
+                <Icon name="close" size="sm" /> Reset
+              </button>
+            </div>
+          </div>
+
+          {/* recent reports */}
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
+              <p className="text-sm font-bold text-slate-800">Recent Reports</p>
+              <Link href="/dashboard/reports" className="text-xs font-semibold text-primary-600 hover:underline">
+                View All
+              </Link>
+            </div>
+            <div className="max-h-[340px] divide-y divide-slate-50 overflow-y-auto">
+              {recent.map((r) => {
+                const tile = STATUS_TILE[r.status];
+                return (
+                  <Link
+                    key={r.id}
+                    href={`/reports/${r.id}`}
+                    onMouseEnter={() => locate(r)}
+                    className="flex items-center gap-2.5 px-4 py-2.5 transition hover:bg-slate-50"
+                  >
+                    <span
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white"
+                      style={{ background: r.category_color ?? statusColor(r.status) }}
+                    >
+                      <Icon name="pin" size="sm" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-semibold text-slate-800">{r.title}</span>
+                      <span className="block truncate text-[11px] text-slate-400">
+                        {r.barangay_name ?? "—"} · {timeAgo(r.created_at)}
+                      </span>
+                    </span>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${tile.bg} ${tile.text}`}>
+                      {STATUS_LABELS[r.status]}
+                    </span>
+                  </Link>
+                );
+              })}
+              {recent.length === 0 && (
+                <p className="p-6 text-center text-sm text-slate-400">No reports match.</p>
+              )}
+            </div>
+          </div>
+
+          {/* status legend */}
+          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+              {STATUS_LEGEND.map((l) => (
+                <span key={l.key} className="flex items-center gap-1.5 text-[11px] text-slate-500">
                   <span className="h-2 w-2 rounded-full" style={{ background: l.color }} />
                   {l.label}
                 </span>
               ))}
             </div>
           </div>
-          <div className="border-b border-slate-100 px-4 py-2.5">
-            <p className="text-sm font-semibold">{filtered.length} report{filtered.length === 1 ? "" : "s"} shown</p>
-          </div>
-          <div className="flex-1 divide-y divide-slate-100 overflow-y-auto">
-            {filtered.map((r) => (
-              <button
-                key={r.id}
-                onMouseEnter={() => setSelected(r.id)}
-                onFocus={() => setSelected(r.id)}
-                onClick={() => window.open(`/reports/${r.id}`, "_self")}
-                className={`press flex w-full items-start gap-2.5 px-4 py-3 text-left hover:bg-slate-50 ${
-                  selected === r.id ? "bg-primary-50/70" : ""
-                }`}
-              >
-                <span
-                  className="mt-1.5 h-3 w-3 shrink-0 rounded-full border border-white shadow"
-                  style={{ background: r.category_color ?? statusColor(r.status) }}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold text-slate-800">{r.title}</span>
-                  <span className="block text-xs text-slate-400">Brgy. {r.barangay_name ?? "—"}</span>
-                </span>
-                <span
-                  className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
-                  style={{
-                    background: `${statusColor(r.status)}22`,
-                    color: statusColor(r.status),
-                  }}
-                >
-                  {r.status.replace(/_/g, " ")}
-                </span>
-              </button>
-            ))}
-            {filtered.length === 0 && (
-              <p className="p-6 text-center text-sm text-slate-400">
-                No reports match the filters.
-              </p>
-            )}
-          </div>
         </div>
       </div>
-
-      <p className="hidden items-center gap-1.5 text-xs text-slate-400 sm:flex">
-        <Icon name="pin" size="sm" />
-        Click a cluster to zoom in · hover a report on the right to locate it · click a marker to open the report.
-      </p>
     </div>
   );
 }
