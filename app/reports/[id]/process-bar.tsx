@@ -2,27 +2,33 @@ import { STATUS_FLOW, STATUS_LABELS } from "@/lib/constants";
 import type { ReportStatus } from "@/lib/constants";
 
 /**
- * The report process, made visible.
+ * The report process, made visible — reference-style stepper.
  *
- * Horizontal stepper showing all seven steps of the lifecycle:
- * Submitted → Under Review → Verified → Assigned → In Progress → Resolved → Closed
- *
- * Every step before the current one is "done", the current step is
- * highlighted, and everything after stays muted — so a citizen or staff
- * member can tell at a glance where the report is in the process.
+ * Every step before the current one is a green check with its timestamp,
+ * the current step is a bold blue dot, and everything after stays muted.
  */
-export default function ProcessBar({ status }: { status: ReportStatus }) {
+export default function ProcessBar({
+  status,
+  dates,
+  bare = false,
+}: {
+  status: ReportStatus;
+  /** first timestamp each status was reached, keyed by status */
+  dates?: Partial<Record<ReportStatus, string>>;
+  /** bare = no card chrome (embed inside another card) */
+  bare?: boolean;
+}) {
   const current = STATUS_FLOW.indexOf(status);
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm sm:p-4">
+    <div className={bare ? "" : "rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm sm:p-4"}>
       <ol className="flex items-start gap-0 overflow-x-auto pb-1">
         {STATUS_FLOW.map((step, i) => {
           const done = i < current;
           const active = i === current;
           return (
             <li key={step} className="flex min-w-0 flex-1 items-start">
-              <div className="flex min-w-0 flex-col items-center gap-1.5">
+              <div className="flex min-w-0 flex-col items-center gap-1">
                 {/* node */}
                 <span
                   className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition ${
@@ -37,17 +43,23 @@ export default function ProcessBar({ status }: { status: ReportStatus }) {
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M4.5 12.5l5 5 10-11" />
                     </svg>
+                  ) : active ? (
+                    <span className="h-2 w-2 rounded-full bg-white" />
                   ) : (
                     i + 1
                   )}
                 </span>
                 {/* label */}
                 <span
-                  className={`whitespace-nowrap text-center text-[10px] font-semibold leading-tight sm:text-[11px] ${
-                    active ? "text-primary-700" : done ? "text-slate-500" : "text-slate-300"
+                  className={`whitespace-nowrap text-center text-[10px] font-bold leading-tight sm:text-[11px] ${
+                    active ? "text-primary-700" : done ? "text-slate-600" : "text-slate-300"
                   }`}
                 >
                   {STATUS_LABELS[step]}
+                </span>
+                {/* timestamp */}
+                <span className="whitespace-nowrap text-center text-[9px] leading-tight text-slate-400">
+                  {done || active ? dates?.[step] ?? "" : ""}
                 </span>
               </div>
               {/* connector */}

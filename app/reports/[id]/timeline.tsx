@@ -13,7 +13,7 @@ const STEP_ICONS: Record<string, IconName> = {
 };
 
 const STEP_ACCENTS: Record<string, string> = {
-  submitted: "text-slate-400",
+  submitted: "text-primary-500",
   under_review: "text-warn-500",
   verified: "text-accent-500",
   assigned: "text-primary-500",
@@ -22,29 +22,53 @@ const STEP_ACCENTS: Record<string, string> = {
   closed: "text-slate-500",
 };
 
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function fmt(iso: string): string {
+  const d = new Date(iso);
+  const h = d.getHours();
+  const hr12 = h % 12 === 0 ? 12 : h % 12;
+  const ampm = h < 12 ? "AM" : "PM";
+  return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}, ${hr12}:${String(d.getMinutes()).padStart(2, "0")} ${ampm}`;
+}
+
 type HistoryEntry = {
   id: string;
   from_status: string | null;
   to_status: string;
   note: string | null;
+  changed_by: string | null;
   created_at: string;
 };
 
+const LABELS: Record<string, string> = {
+  submitted: "Created",
+  assigned: "Assigned to Department",
+  in_progress: "Status Updated",
+};
+
 /**
- * Activity log — what actually happened, newest last.
- *
- * Unlike the old timeline it shows only real events from `status_history`
- * (status changes + staff progress notes). No "pending" placeholder rows:
- * where the report *is* is already shown by the ProcessBar above; this
- * card answers *what has been done so far and by whom*.
+ * Report Timeline — reference-style: bold event label, timestamp under it,
+ * "by <name>" on the right, rail-connected status dots.
  */
-export default function ActivityLog({ history }: { history: HistoryEntry[] }) {
+export default function ActivityLog({
+  history,
+  actors,
+  reporterName,
+}: {
+  history: HistoryEntry[];
+  actors?: Record<string, string | undefined>;
+  reporterName?: string;
+}) {
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-        <p className="text-sm font-bold text-slate-800">Activity</p>
+        <p className="flex items-center gap-2 text-sm font-bold text-slate-800">
+          <Icon name="clock" size="md" className="text-primary-600" />
+          Report Timeline
+        </p>
         <span className="text-[11px] font-medium text-slate-400">
-          {history.length} update{history.length === 1 ? "" : "s"}
+          {history.length} event{history.length === 1 ? "" : "s"}
         </span>
       </div>
 
@@ -53,11 +77,22 @@ export default function ActivityLog({ history }: { history: HistoryEntry[] }) {
           No activity yet — updates appear here as staff process the report.
         </p>
       ) : (
-        <ol className="max-h-[320px] space-y-0 overflow-y-auto px-4 py-3">
+        <ol className="max-h-[360px] space-y-0 overflow-y-auto px-4 py-3">
           {history.map((h, i) => {
             const isNote = (h.note ?? "").startsWith("Progress note: ");
-            const label = isNote ? "Progress note" : STATUS_LABELS[h.to_status as keyof typeof STATUS_LABELS] ?? h.to_status;
+            const label = isNote
+              ? "Progress Note"
+              : LABELS[h.to_status] ??
+                STATUS_LABELS[h.to_status as keyof typeof STATUS_LABELS] ??
+                h.to_status;
             const noteText = isNote ? (h.note ?? "").replace(/^Progress note: /, "") : h.note;
+            const by = h.changed_by
+              ? (actors?.[h.changed_by] ??
+                (h.changed_by && h.id === "created" ? reporterName : undefined) ??
+                (h.id === "created" ? reporterName : "Admin"))
+              : "System";
+            const chip = h.to_status === "in_progress" && !isNote ? "In Progress" : null;
+
             return (
               <li key={h.id} className="relative flex gap-3 pb-4 last:pb-0">
                 {/* rail */}
@@ -77,18 +112,17 @@ export default function ActivityLog({ history }: { history: HistoryEntry[] }) {
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <p className="truncate text-[13px] font-semibold text-slate-700">
-                      {label}
-                    </p>
-                    <time className="shrink-0 text-[11px] text-slate-400">
-                      {new Date(h.created_at).toLocaleString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </time>
+                    <p className="truncate text-[13px] font-bold text-slate-800">{label}</p>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {chip && (
+                        <span className="rounded-full bg-warn-50 px-2 py-0.5 text-[10px] font-bold text-warn-700">
+                          {chip}
+                        </span>
+                      )}
+                      <span className="text-[11px] text-slate-400">by {by}</span>
+                    </span>
                   </div>
+                  <time className="block text-[11px] text-slate-400">{fmt(h.created_at)}</time>
                   {noteText && (
                     <p className="mt-0.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-500">
                       {noteText}
