@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { cleanupReportPhotos } from "@/lib/storage/cleanup";
 import { requireProfile } from "@/lib/data";
 import type { ReportStatus } from "@/lib/constants";
 import type {
@@ -127,6 +128,7 @@ export async function verifyReport(reportId: string): Promise<ActionResult> {
 export async function deleteReport(reportId: string): Promise<ActionResult> {
   await requireAdmin();
   const supabase = await createClient();
+  await cleanupReportPhotos(reportId); // best-effort storage/CDN cleanup first
   const { error } = await supabase
     .from("reports")
     .delete()
@@ -529,9 +531,14 @@ async function purgeRegistration(userId: string): Promise<ActionResult> {
     if (profErr) return { ok: false, error: profErr.message };
   }
 
-  // 3. best-effort: remove the ID photo from private storage
+  // 3. best-effort: remove the ID photo from its storage backend
   if (idPath) {
-    await adminClient.storage.from("verification-ids").remove([idPath]).catch(() => {});
+    if (idPath.startsWith("cld:")) {
+      const { cloudinaryDestroy } = await import("@/lib/storage/cloudinary");
+      await cloudinaryDestroy(idPath);
+    } else {
+      await adminClient.storage.from("verification-ids").remove([idPath]).catch(() => {});
+    }
   }
 
   // 4. clean up the admins' "new registration" notifications for this user

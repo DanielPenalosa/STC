@@ -7,6 +7,7 @@ import { requireProfile } from "@/lib/data";
 import { runAiAnalysis } from "@/lib/ai";
 import { detectDuplicates } from "@/lib/ai/duplicate";
 import { resolveBarangay } from "@/lib/detect-server";
+import { cleanupReportPhotos } from "@/lib/storage/cleanup";
 import type { Report, ReportPhoto } from "@/lib/types";
 import type { ReportStatus } from "@/lib/constants";
 
@@ -123,11 +124,17 @@ export async function createReport(
 
 export async function deleteMyReport(reportId: string): Promise<ActionResult> {
   const supabase = await createClient();
-  const { error } = await supabase
+  // fetch ownership/status before deleting; cleanup needs the photo paths
+  const { data: owned } = await supabase
     .from("reports")
-    .delete()
+    .select("id")
     .eq("id", reportId)
-    .eq("status", "submitted");
+    .eq("status", "submitted")
+    .maybeSingle();
+  if (!owned) return { ok: false, error: "Report not found or already processed." };
+
+  await cleanupReportPhotos(reportId);
+  const { error } = await supabase.from("reports").delete().eq("id", reportId);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/dashboard/my-reports");
   return { ok: true };

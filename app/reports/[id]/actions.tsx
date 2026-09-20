@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { compressImage } from "@/lib/compress";
 import {
   updateReportStatus,
   addProgressNote,
@@ -85,11 +86,12 @@ export default function ReportActions({
   if (!isStaff && !showCitizen) return null;
 
   async function uploadEvidence(file: File) {
-    // goes through the server action — service-role storage write + catalog
-    // row, so evidence never silently vanishes on drifted DB policies
+    // compress on-device, then through the server action — service-role
+    // storage write + catalog row, so evidence never silently vanishes on
+    // drifted DB policies
     setEvidenceBusy(true);
     setError(null);
-    const res = await uploadEvidencePhoto(reportId, file);
+    const res = await uploadEvidencePhoto(reportId, await compressImage(file));
     if (!res.ok) setError(res.error ?? "Upload failed");
     else router.refresh();
     setEvidenceBusy(false);

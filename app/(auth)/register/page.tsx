@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { compressImage } from "@/lib/compress";
 import { registerCitizen, saveIdPhotoPath } from "@/app/actions/auth";
 import { btn } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -77,7 +78,9 @@ export default function RegisterPage() {
     // on storage RLS policies being present on the live deployment.
     try {
       const fd = new FormData();
-      fd.append("file", idFile);
+      // gentle client-side compression — OCR needs legibility, so keep
+      // quality high; still typically halves the upload size
+      fd.append("file", await compressImage(idFile, { maxEdge: 2000, quality: 0.9 }));
       const upRes = await fetch("/api/upload-id", { method: "POST", body: fd });
       const upJson = await upRes.json().catch(() => null);
       if (!upRes.ok || !upJson?.ok) {

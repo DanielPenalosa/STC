@@ -1,19 +1,29 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  cloudinaryConfigured,
+  cloudinaryUpload,
+  cloudinaryUploadPrivate,
+} from "@/lib/storage/cloudinary";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
 /**
- * POST /api/upload-photo — multipart with `file` and optional `path`.
- * Stores a report photo in the `report-photos` bucket using the service
- * role after verifying the caller's session. Access control happens HERE
- * in code, so a missing/drifted storage policy on the database can never
- * make a citizen's photo vanish between upload and admin review.
+ * POST /api/upload-photo — multipart with `file`, `bucket`, optional `path`.
  *
- * Path safety: if provided, must be a plain relative path with no `..`,
- * leading slash, or backslashes; otherwise one is generated.
+ * ALL photo storage goes to Cloudinary when configured:
+ *   - bucket=report-photos    → public CDN asset, returns "cld:<publicId>"
+ *   - bucket=verification-ids → PRIVATE "authenticated" asset, same marker;
+ *     delivery happens only via signed URLs generated in /api/photo
+ *
+ * Falls back to Supabase Storage (service role) when Cloudinary env vars
+ * are absent, so the app works before/without Cloudinary setup.
+ *
+ * Access control happens HERE in code either way: a valid session is
+ * required, size/type limits are enforced before any write, paths are
+ * sanitized, and ID photos are namespaced under the caller's own user id.
  */
 export async function POST(request: Request) {
   try {
@@ -38,7 +48,23 @@ export async function POST(request: Request) {
       );
     }
 
+    const bucket = form.get("bucket") === "verification-ids" ? "verification-ids" : "report-photos";
     const rawPath = typeof form.get("path") === "string" ? (form.get("path") as string) : "";
+
+    if (cloudinaryConfigured()) {
+      if (bucket === "verification-ids") {
+        // private asset, namespaced under the caller's user id
+        const storagePath = await cloudinaryUploadPrivate(file, `ids/${auth.user.id}`);
+        return NextResponse.json({ ok: true, path: storagePath, backend: "cloudinary" });
+      }
+      const folder = rawPath
+        ? rawPath.split("/").slice(0, 2).join("/")
+        : `pending/${auth.user.id}`;
+      const storagePath = await cloudinaryUpload(file, folder);
+      return NextResponse.json({ ok: true, path: storagePath, backend: "cloudinary" });
+    }
+
+    /* ---------- Supabase fallback ---------- */
     const safePath =
       rawPath &&
       !rawPath.includes("..") &&
@@ -46,15 +72,30 @@ export async function POST(request: Request) {
       !rawPath.includes("\\") &&
       rawPath.length < 300
         ? rawPath
-        : `pending/${Date.now()}-${(file.name || "photo").replace(/[^\w.-]/g, "_")}`;
+        : bucket === "verification-ids"
+          ? `${auth.user.id}/id-${Date.now()}.jpg`
+          : `pending/${Date.now()}-${(file.name || "photo").replace(/[^\w.-]/g, "_")}`;
 
-    const { error } = await createAdminClient()
-      .storage
+    const adminStorage = createAdminClient().storage;
+    if (bucket === "verification-ids") {
+      if (!safePath.startsWith(`${auth.user.id}/`)) {
+        return NextResponse.json(
+          { ok: false, error: "Invalid ID path." },
+          { status: 400 }
+        );
+      }
+      const { error } = await adminStorage
+        .from("verification-ids")
+        .upload(safePath, file, { contentType: file.type || "image/jpeg", upsert: true });
+      if (error) throw error;
+      return NextResponse.json({ ok: true, path: safePath, backend: "supabase" });
+    }
+
+    const { error } = await adminStorage
       .from("report-photos")
       .upload(safePath, file, { contentType: file.type || "image/jpeg" });
     if (error) throw error;
-
-    return NextResponse.json({ ok: true, path: safePath });
+    return NextResponse.json({ ok: true, path: safePath, backend: "supabase" });
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : "Upload failed." },

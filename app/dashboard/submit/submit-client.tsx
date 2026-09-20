@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { compressImage } from "@/lib/compress";
 import { createReport } from "@/app/actions/reports";
 import { btn, inputCls, labelCls, Card } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -232,11 +233,12 @@ export default function SubmitReportClient({
       const photoPaths: string[] = [];
       const photoHashes: string[] = [];
       for (const f of files) {
-        // service-role upload via server route — policy drift on the live DB
-        // can no longer make photos vanish between upload and admin view
-        const path = `pending/${Date.now()}-${f.name}`;
+        // shrink on-device first (5 MB phone photo → ~300 KB) — cuts storage
+        // and upload time ~10x on either backend
+        const compressed = await compressImage(f);
+        const path = `pending/${Date.now()}-${compressed.name}`;
         const fd = new FormData();
-        fd.append("file", f);
+        fd.append("file", compressed);
         fd.append("path", path);
         const upRes = await fetch("/api/upload-photo", { method: "POST", body: fd });
         const upJson = await upRes.json().catch(() => ({}));
@@ -244,7 +246,7 @@ export default function SubmitReportClient({
           throw new Error(upJson.error ?? "Photo upload failed");
         }
         photoPaths.push(path);
-        photoHashes.push(await sha256Hex(await f.arrayBuffer()));
+        photoHashes.push(await sha256Hex(await compressed.arrayBuffer()));
       }
 
       const res = await createReport({
