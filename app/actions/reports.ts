@@ -73,19 +73,29 @@ export async function createReport(
   const reportId = data.id as string;
 
   if (input.photoPaths.length) {
-    // service-role insert — the storage upload happened with the user's
-    // session, but the catalog row must never silently fail on drifted
-    // policies (missing rows are why admins saw reports without photos)
-    const rows = input.photoPaths.map((p, i) => ({
+    // service-role insert — the catalog row must never silently fail.
+    // content_hash is written in a SECOND pass because older databases
+    // may not have that column yet; a failure there must not lose the
+    // photo reference itself (that's why admins saw photo-less reports)
+    const rows = input.photoPaths.map((p) => ({
       report_id: reportId,
       storage_path: p,
       kind: "citizen",
-      ...(input.photoHashes?.[i] ? { content_hash: input.photoHashes[i] } : {}),
     }));
     const { error: photosError } = await createAdminClient()
       .from("report_photos")
       .insert(rows);
-    if (photosError) console.error("report_photos insert failed:", photosError.message);
+    if (photosError) {
+      console.error("report_photos insert failed:", photosError.message);
+    } else if (input.photoHashes?.length) {
+      const { error: hashError } = await createAdminClient()
+        .from("report_photos")
+        .update({ content_hash: input.photoHashes[0] })
+        .eq("report_id", reportId)
+        .eq("kind", "citizen")
+        .in("storage_path", input.photoPaths);
+      if (hashError) console.warn("content_hash skipped:", hashError.message);
+    }
   }
 
   // location snapshot

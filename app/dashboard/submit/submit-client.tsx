@@ -245,7 +245,9 @@ export default function SubmitReportClient({
         if (!upRes.ok || !upJson.ok) {
           throw new Error(upJson.error ?? "Photo upload failed");
         }
-        photoPaths.push(path);
+        // the SERVER decides the storage id ("cld:..." on Cloudinary) —
+        // the local path is only a folder hint, never the DB reference
+        photoPaths.push(String(upJson.path ?? path));
         photoHashes.push(await sha256Hex(await compressed.arrayBuffer()));
       }
 

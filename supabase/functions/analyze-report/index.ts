@@ -45,10 +45,13 @@ Deno.serve(async (req: Request) => {
 
     /* -------- precheck mode: { photoPath, description } -------- */
     if (!body.reportId && body.photoPath) {
-      // signed URL works on both public and private buckets (service role)
-      const photoUrl = (
-        await supabase.storage.from("report-photos").createSignedUrl(body.photoPath, 600)
-      ).data?.signedUrl ?? null;
+      // Cloudinary precheck uploads carry the cld: marker; otherwise sign
+      // a Supabase URL (works on both public and private buckets)
+      const photoUrl = body.photoPath.startsWith("cld:")
+        ? `https://res.cloudinary.com/${Deno.env.get("CLOUDINARY_CLOUD_NAME")}/image/upload/f_auto,q_auto,w_1600/${body.photoPath.slice(4)}.jpg`
+        : (
+            await supabase.storage.from("report-photos").createSignedUrl(body.photoPath, 600)
+          ).data?.signedUrl ?? null;
       const { categories } = await loadCategories(supabase);
       const result = await runVision({ imageUrl: photoUrl, context: body.description ?? "", categories });
 
@@ -96,13 +99,18 @@ Deno.serve(async (req: Request) => {
       .select("storage_path")
       .eq("report_id", reportId)
       .eq("kind", "citizen");
-    const photoUrl = photos?.[0]
-      ? (
-          await supabase.storage
-            .from("report-photos")
-            .createSignedUrl(photos[0].storage_path, 600)
-        ).data?.signedUrl ?? null
-      : null;
+    let photoUrl: string | null = null;
+    const photoPath = photos?.[0]?.storage_path ?? null;
+    if (photoPath?.startsWith("cld:")) {
+      // Cloudinary-backed photo — public CDN delivery with auto transform
+      photoUrl = `https://res.cloudinary.com/${Deno.env.get("CLOUDINARY_CLOUD_NAME")}/image/upload/f_auto,q_auto,w_1600/${photoPath.slice(4)}.jpg`;
+    } else if (photoPath) {
+      photoUrl = (
+        await supabase.storage
+          .from("report-photos")
+          .createSignedUrl(photoPath, 600)
+      ).data?.signedUrl ?? null;
+    }
 
     const { categories } = await loadCategories(supabase);
     const context =
