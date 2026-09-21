@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, StatusBadge } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
 import { CITY_NAME } from "@/app/brand";
+import { scopeFor, applyScope } from "@/lib/scope";
 import type { ReportStatus } from "@/lib/constants";
 import type { Report } from "@/lib/types";
 import type { Profile } from "@/lib/types";
@@ -95,16 +96,21 @@ function Donut({ segments, total }: { segments: { value: number; color: string }
 
 export default async function AdminDashboard({ profile }: { profile: Profile }) {
   const supabase = await createClient();
+  const scope = scopeFor(profile);
 
   const [reportsRes, usersRes, deptRes] = await Promise.all([
-    supabase
-      .from("reports")
-      .select(
-        `*, categories(name, icon, color), barangays(name), departments(name, color),
+    applyScope(
+      supabase
+        .from("reports")
+        .select(
+          `*, categories(name, icon, color), barangays(name), departments(name, color),
          report_photos(storage_path, kind)`
-      )
-      .order("created_at", { ascending: false })
-      .limit(500),
+        )
+        .order("created_at", { ascending: false })
+        .limit(500),
+      scope
+    ),
+    // staff RLS: only citizens in their jurisdiction are readable; admins see all.
     supabase.from("users").select("id, role, is_active, verification_status, created_at"),
     supabase.from("departments").select("id", { count: "exact", head: true }),
   ]);
@@ -118,7 +124,7 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
   const users =
     (usersRes.data as { id: string; role: string; is_active: boolean; verification_status: string; created_at: string | null }[]) ??
     [];
-  const deptCount = deptRes.count ?? 0;
+  const deptCount = scope.isStaff ? 1 : (deptRes.count ?? 0);
 
   /* ----- time-aware greeting (Philippine time) ----- */
   const now = Date.now();
@@ -146,10 +152,28 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
   const last7Signups = last7.reduce((a, k) => a + signupsOn(k), 0);
   const prev7Signups = prev7.reduce((a, k) => a + signupsOn(k), 0);
 
-  /* ----- KPIs ----- */
+  /* ----- KPIs (admin sees system-wide; staff see their unit) ----- */
   const totalReports = reports.length;
-  const activeUsers = users.filter((u) => u.is_active).length;
+  const activeUsers = scope.isStaff
+    ? users.filter((u) => u.is_active && u.role === "citizen").length
+    : users.filter((u) => u.is_active).length;
   const pendingAccounts = users.filter((u) => u.role === "citizen" && u.verification_status === "pending").length;
+
+  /* ----- quick actions ----- */
+  const actions: { icon: IconName; title: string; desc: string; href: string }[] =
+    scope.isStaff
+      ? [
+          { icon: "file", title: "View All Reports", desc: `Reports handled by your ${profile.role}`, href: "/dashboard/reports" },
+          { icon: "inbox", title: "Newly Assigned", desc: "Accept and start processing", href: "/dashboard/assigned" },
+          { icon: "wrench", title: "In Progress", desc: "Reports you're currently working on", href: "/dashboard/in-progress" },
+          { icon: "check-circle", title: "Resolved", desc: "Completed work history", href: "/dashboard/resolved" },
+        ]
+      : [
+          { icon: "file", title: "View All Reports", desc: "Check and manage submitted reports", href: "/dashboard/reports" },
+          { icon: "robot", title: "Review AI Recommendations", desc: "Accept or override AI classification", href: "/dashboard/ai" },
+          { icon: "users", title: "Manage Users", desc: "Approvals, roles and account status", href: "/dashboard/users" },
+          { icon: "settings", title: "System Settings", desc: "Configure system preferences", href: "/dashboard/settings" },
+        ];
   const reportsTrend = pct(last7Reports, prev7Reports);
   const usersTrend = pct(last7Signups, prev7Signups);
   const pendingTrend = pct(last7Signups, prev7Signups);
@@ -185,14 +209,6 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
   }
   const gridLines = [0.25, 0.5, 0.75, 1].map((f) => CH - 10 - f * (CH - 26));
 
-  /* ----- quick actions ----- */
-  const actions: { icon: IconName; title: string; desc: string; href: string }[] = [
-    { icon: "file", title: "View All Reports", desc: "Check and manage submitted reports", href: "/dashboard/reports" },
-    { icon: "robot", title: "Review AI Recommendations", desc: "Accept or override AI classification", href: "/dashboard/ai" },
-    { icon: "users", title: "Manage Users", desc: "Approvals, roles and account status", href: "/dashboard/users" },
-    { icon: "settings", title: "System Settings", desc: "Configure system preferences", href: "/dashboard/settings" },
-  ];
-
   return (
     <div className="space-y-5">
       {/* ---------- greeting header ---------- */}
@@ -201,7 +217,9 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
           <p className="text-sm text-slate-500">{greeting},</p>
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">{firstName}</h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            Here&apos;s what&apos;s happening in {CITY_NAME} today.
+            {scope.isStaff
+              ? `Here's what's happening in your ${profile.role} today.`
+              : `Here's what's happening in ${CITY_NAME} today.`}
           </p>
         </div>
         <div className="flex gap-2">
@@ -242,6 +260,7 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
             {reportsTrend >= 0 ? "+" : ""}{reportsTrend}% <span className="text-slate-400">up from last 7 days</span>
           </p>
         </Card>
+        {/* activeUsers for staff counts citizens in jurisdiction; admins see all users */}
 
         <Card className="p-4 transition hover:shadow-md">
           <div className="flex items-start justify-between">
@@ -373,7 +392,10 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
         <Card className="overflow-hidden lg:col-span-3">
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <p className="text-sm font-bold text-slate-800">Recent Reports</p>
-            <Link href="/dashboard/reports" className="text-xs font-semibold text-primary-600 hover:underline">
+            <Link
+              href={scope.isStaff ? "/dashboard/assigned" : "/dashboard/reports"}
+              className="text-xs font-semibold text-primary-600 hover:underline"
+            >
               View All
             </Link>
           </div>

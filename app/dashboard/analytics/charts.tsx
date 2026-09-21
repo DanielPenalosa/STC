@@ -15,7 +15,7 @@ import {
 
 export type AnalyticsRow = {
   status: string;
-  priority: string;
+  priority: number;
   created_at: string;
   category: string;
   barangay: string;

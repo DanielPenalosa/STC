@@ -36,3 +36,24 @@ export async function cleanupReportPhotos(reportId: string): Promise<void> {
     // never block deletion on cleanup
   }
 }
+
+/**
+ * Remove ONE photo asset from its storage backend (Cloudinary or Supabase)
+ * by its stored path. Best-effort — a CDN hiccup must never block the
+ * catalog-row delete; orphans can be swept later.
+ */
+export async function cleanupReportPhoto(storagePath: string): Promise<void> {
+  try {
+    if (storagePath.startsWith("cld:")) {
+      await cloudinaryDestroy(storagePath);
+    } else {
+      await createAdminClient()
+        .storage
+        .from("report-photos")
+        .remove([storagePath])
+        .catch(() => {});
+    }
+  } catch {
+    // never block the caller on storage cleanup
+  }
+}

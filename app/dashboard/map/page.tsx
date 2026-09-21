@@ -1,22 +1,30 @@
 import { createClient } from "@/lib/supabase/server";
+import { requireProfile } from "@/lib/data";
 import { PageHeader } from "@/components/ui";
 import { publicPhotoUrl } from "@/lib/photo";
+import { scopeFor, applyScope } from "@/lib/scope";
 import MapClient, { type MapReport } from "./map-client";
 import type { ReportStatus } from "@/lib/constants";
 import type { Report } from "@/lib/types";
 
 export default async function MapPage() {
   const supabase = await createClient();
+  const profile = await requireProfile();
+  const scope = scopeFor(profile);
+
   const [reportsRes, catsRes, brgysRes] = await Promise.all([
-    supabase
-      .from("reports")
-      .select(
-        `id, ref_code, title, status, priority, latitude, longitude, created_at,
+    applyScope(
+      supabase
+        .from("reports")
+        .select(
+          `id, ref_code, title, status, priority, latitude, longitude, created_at,
          categories(id, name, icon, color), barangays(id, name),
          report_photos(storage_path, kind)`
-      )
-      .order("created_at", { ascending: false })
-      .limit(1000),
+        )
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      scope
+    ),
     supabase.from("categories").select("id, name, icon").order("name"),
     supabase.from("barangays").select("id, name").order("name"),
   ]);
@@ -50,7 +58,11 @@ export default async function MapPage() {
     <div>
       <PageHeader
         title="Report Map"
-        subtitle="Explore report locations across [CITY/MUNICIPALITY]"
+        subtitle={
+          scope.isStaff
+            ? `Reports assigned to your ${scope.role} — plotted across [CITY/MUNICIPALITY]`
+            : "Explore report locations across [CITY/MUNICIPALITY]"
+        }
       />
       <MapClient
         reports={reports}

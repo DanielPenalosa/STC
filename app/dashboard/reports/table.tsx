@@ -38,6 +38,14 @@ const STEP_LABELS: Record<string, string> = {
   closed: "Closed",
 };
 
+const PRIORITY_LABELS: Record<number, string> = {
+  1: "Normal",
+  2: "Low",
+  3: "Medium",
+  4: "High",
+  5: "Critical",
+};
+
 const STEP_DONE: Record<string, boolean> = {
   submitted: true,
   under_review: false,
@@ -146,7 +154,7 @@ export default function ReportsTable({
                   </td>
                   <td className="px-3 py-2.5">
                     <StatusBadge status={r.status} />
-                    {r.priority === "high" && (
+                    {r.priority >= 4 && (
                       <span className="ml-1 inline-block align-middle">
                         <PriorityBadge priority={r.priority} />
                       </span>

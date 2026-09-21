@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireProfile, publicPhotoUrl } from "@/lib/data";
 import { Icon, type IconName } from "@/components/icons";
 import MapCard from "@/components/map-card";
-import { STATUS_LABELS, ROLE_LABELS, PRIORITY_COLORS } from "@/lib/constants";
+import { STATUS_LABELS, ROLE_LABELS, PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/constants";
 import type { ReportStatus, Priority } from "@/lib/constants";
 import type { Report, ReportPhoto, Assignment, AiAnalysis } from "@/lib/types";
 import ProcessBar from "./process-bar";
@@ -16,6 +16,13 @@ import DuplicatesCard from "./duplicates-card";
 import NotesCard from "./notes-card";
 import PrintButton from "./print-button";
 import CopyButton from "./copy-button";
+import {
+  FollowButton,
+  FollowupSection,
+  FeedbackCard,
+  VerificationCard,
+} from "./engagement";
+import { StaffActions } from "./actions";
 import type { ReportDuplicate } from "@/lib/types";
 
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -93,7 +100,7 @@ export default async function ReportDetailPage({
     }
   }
 
-  const [photosRes, historyRes, assignmentRes, aiRes, dupRes] = await Promise.all([
+  const [photosRes, historyRes, assignmentRes, aiRes, dupRes, followsRes, followupsRes, feedbackRes, myFollowRes] = await Promise.all([
     supabase.from("report_photos").select("*").eq("report_id", report.id).order("created_at"),
     supabase.from("status_history").select("*").eq("report_id", report.id).order("created_at"),
     supabase.from("assignments").select("*").eq("report_id", report.id).order("created_at"),
@@ -107,6 +114,19 @@ export default async function ReportDetailPage({
     profile.role === "admin" && report.is_possible_duplicate
       ? supabase.from("report_duplicates").select("*").eq("report_id", report.id)
       : Promise.resolve({ data: [] as ReportDuplicate[] }),
+    supabase.from("report_follows").select("user_id").eq("report_id", report.id),
+    supabase
+      .from("report_followups")
+      .select("id, message, created_at, user_id")
+      .eq("report_id", report.id)
+      .order("created_at", { ascending: false }),
+    supabase.from("report_feedback").select("rating, comment").eq("report_id", report.id).maybeSingle(),
+    supabase
+      .from("report_follows")
+      .select("user_id")
+      .eq("report_id", report.id)
+      .eq("user_id", profile.id)
+      .maybeSingle(),
   ]);
 
   /* duplicate evidence resolution (admin) */
@@ -137,6 +157,28 @@ export default async function ReportDetailPage({
   }[]) ?? [];
   const assignments = (assignmentRes.data as unknown as Assignment[]) ?? [];
   const ai = (aiRes.data as unknown as AiAnalysis | null) ?? null;
+
+  /* lifecycle v2 engagement data */
+  const followerCount = (followsRes.data as { user_id: string }[] | null)?.length ?? 0;
+  const isFollowing = Boolean(myFollowRes.data);
+  const isReporter = report.user_id === profile.id;
+  const followupsRaw = (followupsRes.data as unknown as { id: string; message: string; created_at: string; user_id: string }[] | null) ?? [];
+  const followupAuthors = followupsRaw.length
+    ? await supabase
+        .from("users")
+        .select("id, full_name")
+        .in("id", Array.from(new Set(followupsRaw.map((f) => f.user_id))))
+    : { data: [] as { id: string; full_name: string | null }[] | null };
+  const followupNames = Object.fromEntries(
+    ((followupAuthors.data as { id: string; full_name: string | null }[] | null) ?? []).map((u) => [u.id, u.full_name])
+  );
+  const followups = followupsRaw.map((f) => ({
+    id: f.id,
+    message: f.message,
+    created_at: f.created_at,
+    author: followupNames[f.user_id] ?? "Citizen",
+  }));
+  const feedback = (feedbackRes.data as unknown as { rating: number; comment: string | null } | null) ?? null;
 
   /* "by <name>" attribution for the timeline */
   const changerIds = Array.from(
@@ -236,9 +278,20 @@ export default async function ReportDetailPage({
               departments={departments}
               barangays={barangays}
               hasAssignment={assignments.length > 0}
+              assignedToName={
+                report.departments?.name ?? report.barangays?.name ?? assignedTo
+              }
             />
           )}
           <PrintButton />
+          {!isStaff && (
+            <FollowButton
+              reportId={report.id}
+              initialFollowing={isFollowing}
+              followers={followerCount}
+              isReporter={isReporter}
+            />
+          )}
         </div>
       </div>
 
@@ -286,8 +339,8 @@ export default async function ReportDetailPage({
                 <span
                   className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold ${PRIORITY_COLORS[report.priority]}`}
                 >
-                  {report.priority === "high" && <Icon name="alert" size="sm" />}
-                  {report.priority.charAt(0).toUpperCase() + report.priority.slice(1)}
+                  {report.priority >= 4 && <Icon name="alert" size="sm" />}
+                  {PRIORITY_LABELS[report.priority]}
                 </span>
               </InfoTile>
               <InfoTile icon="clock" label="Date & Time">
@@ -394,7 +447,7 @@ export default async function ReportDetailPage({
             </section>
           </div>
 
-          {/* staff work tools / citizen delete */}
+          {/* citizen delete (own report, pending/resolved) */}
           <ReportActions
             reportId={report.id}
             status={report.status}
@@ -405,6 +458,28 @@ export default async function ReportDetailPage({
 
         {/* ============ right rail ============ */}
         <div className="space-y-4">
+          {/* staff/admin action card — pinned above the status stepper */}
+          {(profile.role === "department" || profile.role === "barangay") && (
+            <StaffActions
+              reportId={report.id}
+              status={report.status}
+              role={profile.role}
+              evidence={photos
+                .filter((p) => p.kind === "resolution")
+                .map((p) => ({ id: p.id, url: publicPhotoUrl(p.storage_path, 320) }))}
+            />
+          )}
+
+          {/* admin verification panel — report marked Done by the department */}
+          {profile.role === "admin" && report.status === "done" && (
+            <VerificationCard
+              reportId={report.id}
+              completionPhotos={photos
+                .filter((p) => p.kind === "resolution")
+                .map((p) => ({ id: p.id, url: publicPhotoUrl(p.storage_path, 640) }))}
+            />
+          )}
+
           {/* current status stepper */}
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800">
@@ -439,7 +514,7 @@ export default async function ReportDetailPage({
                   <span
                     className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold ${PRIORITY_COLORS[report.priority as Priority]}`}
                   >
-                    {report.priority.charAt(0).toUpperCase() + report.priority.slice(1)}
+                    {PRIORITY_LABELS[report.priority as Priority]}
                   </span>
                 </dd>
               </div>
@@ -491,6 +566,35 @@ export default async function ReportDetailPage({
 
           {/* timeline */}
           <ActivityLog history={displayHistory} actors={actors as Record<string, string | undefined>} reporterName={reporter.name} />
+
+          {/* follow-ups (reporter can nudge; everyone relevant sees the thread) */}
+          <FollowupSection
+            reportId={report.id}
+            canPost={isReporter}
+            items={followups}
+          />
+
+          {/* reporter's rating — opens after resolution */}
+          {isReporter && report.status === "resolved" && (
+            <FeedbackCard reportId={report.id} existing={feedback} />
+          )}
+          {feedback && (!isReporter || report.status !== "resolved") && (
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="flex items-center gap-2 text-sm font-bold text-slate-800">
+                <Icon name="sparkles" size="md" className="text-primary-600" />
+                Citizen Feedback
+              </p>
+              <div className="mt-2 flex items-center gap-1">
+                {Array.from({ length: 5 }, (_, i) => (
+                  <span key={i} className={i < feedback.rating ? "text-amber-500" : "text-slate-200"}>★</span>
+                ))}
+                <span className="ml-1 text-xs font-bold text-slate-600">{feedback.rating}/5</span>
+              </div>
+              {feedback.comment && (
+                <p className="mt-1 text-[13px] italic text-slate-500">“{feedback.comment}”</p>
+              )}
+            </section>
+          )}
 
           {/* notes / remarks */}
           <NotesCard

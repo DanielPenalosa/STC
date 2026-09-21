@@ -345,11 +345,12 @@ create policy departments_admin on public.departments for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
 
 -- reports:
---   citizens: own reports only
+--   citizens: own reports + public reports (community feed)
 --   admin: all
---   department: reports assigned to their department
---   barangay: reports assigned to their barangay
---   community view: citizens see non-anonymous public reports (Community Reports feed)
+--   department: ONLY reports assigned to their department
+--   barangay: ONLY reports assigned to their barangay
+--   (the community-feed clause is citizens-only — staff never get a
+--    blanket read grant, visibility comes from assignment alone)
 drop policy if exists reports_select on public.reports;
 create policy reports_select on public.reports for select to authenticated
   using (
@@ -357,7 +358,7 @@ create policy reports_select on public.reports for select to authenticated
     or public.is_admin()
     or public.in_assigned_department(id)
     or public.in_assigned_barangay(id)
-    or (not is_anonymous)          -- community feed
+    or (not is_anonymous and not public.is_staff())   -- community feed
   );
 drop policy if exists reports_insert on public.reports;
 create policy reports_insert on public.reports for insert to authenticated
@@ -388,7 +389,7 @@ create policy photos_select on public.report_photos for select to authenticated
       r.user_id = auth.uid() or public.is_admin()
       or public.in_assigned_department(r.id)
       or public.in_assigned_barangay(r.id)
-      or not r.is_anonymous))
+      or (not r.is_anonymous and not public.is_staff())))
   );
 drop policy if exists photos_insert on public.report_photos;
 create policy photos_insert on public.report_photos for insert to authenticated
@@ -454,7 +455,7 @@ create policy history_select on public.status_history for select to authenticate
       r.user_id = auth.uid() or public.is_admin()
       or public.in_assigned_department(r.id)
       or public.in_assigned_barangay(r.id)
-      or not r.is_anonymous))
+      or (not r.is_anonymous and not public.is_staff())))
   );
 drop policy if exists history_insert on public.status_history;
 create policy history_insert on public.status_history for insert to authenticated

@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setReportStatus, setPriority, assignReport } from "@/app/actions/admin";
+import { setReportStatus, setPriority, assignReport, rejectReport } from "@/app/actions/admin";
 import { btn } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { PRIORITY_LABELS } from "@/lib/constants";
 import type { ReportStatus, Priority } from "@/lib/constants";
 
 type Opt = { id: string; name: string };
@@ -79,6 +80,7 @@ export default function HeaderActions({
   departments,
   barangays,
   hasAssignment,
+  assignedToName,
 }: {
   reportId: string;
   status: ReportStatus;
@@ -86,15 +88,23 @@ export default function HeaderActions({
   departments: Opt[];
   barangays: Opt[];
   hasAssignment: boolean;
+  /** display name of the assigned unit (for the waiting note) */
+  assignedToName?: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [assignType, setAssignType] = useState<"department" | "barangay">("department");
   const [target, setTarget] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
 
   const opts = assignType === "department" ? departments : barangays;
+  /* strict lifecycle gating:
+     - submitted/under_review → Verify + Reject ONLY
+     - verified (not yet routed) → Assign + Priority
+     - assignment exists → waiting note (no further admin routing)      */
   const canTriage = status === "submitted" || status === "under_review";
+  const canAssign = !hasAssignment && (status === "verified" || status === "assigned");
 
   async function run(key: string, fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusy(key);
@@ -113,8 +123,8 @@ export default function HeaderActions({
         </p>
       )}
 
-      {/* — Assign (only before routing) — */}
-      {!hasAssignment && canTriage && (
+      {/* — Assign (only AFTER verification, before routing) — */}
+      {canAssign && (
         <Menu label="Assign" icon="clipboard" tone="primary">
           {(close) => (
             <div className="space-y-2">
@@ -161,11 +171,12 @@ export default function HeaderActions({
         </Menu>
       )}
 
-      {/* — Priority — */}
+      {/* — Priority (after verification; auto-boosted by followers, admin may override) — */}
+      {canAssign && (
       <Menu label="Priority" icon="alert" tone="secondary">
         {(close) => (
           <div className="space-y-0.5">
-            {(["low", "medium", "high"] as Priority[]).map((p) => (
+            {([1, 2, 3, 4, 5] as Priority[]).map((p) => (
               <button
                 key={p}
                 onClick={() => {
@@ -178,13 +189,24 @@ export default function HeaderActions({
                     : "text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                <span className="capitalize">{p}</span>
+                <span>
+                  {PRIORITY_LABELS[p]} <span className="text-xs text-slate-400">· P{p}</span>
+                </span>
                 {p === priority && <Icon name="check-circle" size="sm" />}
               </button>
             ))}
           </div>
         )}
       </Menu>
+      )}
+
+      {/* — assigned reminder note (shows INSTEAD of further actions) — */}
+      {hasAssignment && (status === "assigned" || status === "verified") && (
+        <span className="inline-flex items-center gap-1.5 rounded-lg bg-primary-50 px-3 py-2 text-xs font-medium text-primary-700">
+          <Icon name="clock" size="sm" />
+          Assigned to {assignedToName ?? "a unit"} — please wait for them to accept and work on it.
+        </span>
+      )}
 
       {/* — Verify — */}
       {canTriage && (
@@ -197,19 +219,37 @@ export default function HeaderActions({
         </button>
       )}
 
-      {/* — Reject — */}
+      {/* — Reject (ends the lifecycle during review) — */}
       {canTriage && (
-        <button
-          onClick={() => {
-            if (!confirm("Reject and close this report? The reporter will be notified.")) return;
-            void run("reject", () => setReportStatus(reportId, "closed", "Rejected / closed by admin"));
-          }}
-          disabled={busy !== null}
-          className={btn.danger}
-        >
-          Reject
-        </button>
+        <Menu label="Reject" icon="alert" tone="danger">
+          {(close) => (
+            <div className="space-y-2">
+              <p className="px-1 text-[11px] leading-snug text-slate-500">
+                The reporter is notified with your reason. This ends the report.
+              </p>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                rows={2}
+                maxLength={300}
+                placeholder="Reason (required) — e.g. duplicate of RPT-…"
+                className="w-full resize-none rounded-lg border border-slate-300 px-2.5 py-2 text-sm outline-none focus:border-danger-400 focus:ring-2 focus:ring-danger-50"
+              />
+              <button
+                onClick={() => {
+                  close();
+                  void run("reject", () => rejectReport(reportId, rejectReason));
+                }}
+                disabled={!rejectReason.trim() || busy !== null}
+                className={`${btn.danger} w-full justify-center`}
+              >
+                {busy === "reject" ? "Rejecting…" : "Confirm reject"}
+              </button>
+            </div>
+          )}
+        </Menu>
       )}
+
     </div>
   );
 }

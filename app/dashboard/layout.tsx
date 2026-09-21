@@ -61,13 +61,19 @@ const NAV: Record<Role, NavGroup[]> = {
       ],
     },
   ],
+  // Department & barangay staff share the admin's exact UI — same pages,
+  // same design — but every query is scoped to their unit (RLS-enforced).
   department: [
     {
       items: [
         { href: "/dashboard", label: "Dashboard", icon: "grid", exact: true },
+        { href: "/dashboard/map", label: "Report Map", icon: "map" },
+        { href: "/dashboard/analytics", label: "Analytics", icon: "chart" },
+        { href: "/dashboard/reports", label: "Reports", icon: "file" },
         { href: "/dashboard/assigned", label: "Assigned", icon: "inbox" },
         { href: "/dashboard/in-progress", label: "In Progress", icon: "wrench" },
         { href: "/dashboard/resolved", label: "Resolved", icon: "check-circle" },
+        { href: "/dashboard/settings", label: "Settings", icon: "settings" },
       ],
     },
   ],
@@ -75,9 +81,13 @@ const NAV: Record<Role, NavGroup[]> = {
     {
       items: [
         { href: "/dashboard", label: "Dashboard", icon: "grid", exact: true },
+        { href: "/dashboard/map", label: "Report Map", icon: "map" },
+        { href: "/dashboard/analytics", label: "Analytics", icon: "chart" },
+        { href: "/dashboard/reports", label: "Reports", icon: "file" },
         { href: "/dashboard/assigned", label: "Assigned", icon: "inbox" },
         { href: "/dashboard/in-progress", label: "In Progress", icon: "wrench" },
         { href: "/dashboard/resolved", label: "Resolved", icon: "check-circle" },
+        { href: "/dashboard/settings", label: "Settings", icon: "settings" },
       ],
     },
   ],

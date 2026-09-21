@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   PRIORITY_COLORS,
+  PRIORITY_LABELS,
   STATUS_COLORS,
   STATUS_LABELS,
 } from "@/lib/constants";
@@ -22,7 +23,7 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${PRIORITY_COLORS[priority]}`}
     >
-      {priority === "high" ? "High Priority" : priority}
+      {PRIORITY_LABELS[priority]}
     </span>
   );
 }
@@ -174,7 +175,7 @@ export function ReportCard({
           <p className="mt-0.5 truncate text-xs text-slate-500">
             {[categoryName, barangayName, new Date(createdAt).toLocaleDateString()].filter(Boolean).join(" · ")}
           </p>
-          {priority === "high" && (
+          {priority >= 4 && (
             <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-danger-50 px-2 py-0.5 text-[11px] font-semibold text-danger-600">
               <Icon name="alert" size="sm" /> High Priority
             </span>

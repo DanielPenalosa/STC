@@ -7,7 +7,7 @@ import { requireProfile } from "@/lib/data";
 import { runAiAnalysis } from "@/lib/ai";
 import { detectDuplicates } from "@/lib/ai/duplicate";
 import { resolveBarangay } from "@/lib/detect-server";
-import { cleanupReportPhotos } from "@/lib/storage/cleanup";
+import { cleanupReportPhotos, cleanupReportPhoto } from "@/lib/storage/cleanup";
 import type { Report, ReportPhoto } from "@/lib/types";
 import type { ReportStatus } from "@/lib/constants";
 
@@ -129,7 +129,8 @@ export async function createReport(
 }
 
 /* ------------------------------------------------------------------ */
-/* Citizen: delete own submitted report                                */
+/* Citizen: delete own report — only while Pending (submitted/         */
+/* under_review) or after Resolved                                     */
 /* ------------------------------------------------------------------ */
 
 export async function deleteMyReport(reportId: string): Promise<ActionResult> {
@@ -137,11 +138,17 @@ export async function deleteMyReport(reportId: string): Promise<ActionResult> {
   // fetch ownership/status before deleting; cleanup needs the photo paths
   const { data: owned } = await supabase
     .from("reports")
-    .select("id")
+    .select("id, status")
     .eq("id", reportId)
-    .eq("status", "submitted")
     .maybeSingle();
-  if (!owned) return { ok: false, error: "Report not found or already processed." };
+  const row = owned as { id: string; status: string } | null;
+  if (!row) return { ok: false, error: "Report not found." };
+  if (!"submitted,under_review,resolved".split(",").includes(row.status)) {
+    return {
+      ok: false,
+      error: "Reports can only be deleted while pending review or after being resolved.",
+    };
+  }
 
   await cleanupReportPhotos(reportId);
   const { error } = await supabase.from("reports").delete().eq("id", reportId);
@@ -188,10 +195,15 @@ export async function getReportExtras(reportId: string) {
 /* Staff: status updates (trigger writes history + notifies citizen)   */
 /* ------------------------------------------------------------------ */
 
+/** Allowed transitions per role (lifecycle v2). */
 const STAFF_ALLOWED: Record<string, ReportStatus[]> = {
-  admin: ["submitted", "under_review", "verified", "assigned", "in_progress", "resolved", "closed"],
-  department: ["in_progress", "resolved"],
-  barangay: ["in_progress", "resolved"],
+  admin: [
+    "under_review", "assigned", "in_progress", "done", "resolved", "closed", "rejected",
+  ],
+  // dept/barangay: accept work → in progress; submit completion → done.
+  // Only admin can resolve (verification step) or reject.
+  department: ["in_progress", "done"],
+  barangay: ["in_progress", "done"],
 };
 
 export async function updateReportStatus(
@@ -211,6 +223,23 @@ export async function updateReportStatus(
   const current = (report as { status?: ReportStatus } | null)?.status;
   if (current && !STAFF_ALLOWED[profile.role]?.includes(status)) {
     return { ok: false, error: "Your role cannot set this status" };
+  }
+
+  // lifecycle gate: a department/barangay may only submit completion
+  // ("done") when completion evidence exists — at least one resolution
+  // photo AND a note explaining what was done.
+  if (status === "done" && (profile.role === "department" || profile.role === "barangay")) {
+    const { count } = await supabase
+      .from("report_photos")
+      .select("id", { count: "exact", head: true })
+      .eq("report_id", reportId)
+      .eq("kind", "resolution");
+    if (!count) {
+      return { ok: false, error: "Upload a completion photo before submitting." };
+    }
+    if (!note?.trim()) {
+      return { ok: false, error: "Add a completion note before submitting." };
+    }
   }
 
   const { error } = await supabase
@@ -236,7 +265,7 @@ export async function updateReportStatus(
       .eq("report_id", reportId)
       .is("accepted_at", null);
   }
-  if (status === "resolved") {
+  if (status === "done" || status === "resolved") {
     await supabase
       .from("assignments")
       .update({ completed_at: new Date().toISOString() })
@@ -284,6 +313,50 @@ export async function addProgressNote(
   return { ok: true };
 }
 
+/**
+ * Staff: remove an evidence photo they uploaded BEFORE submitting the
+ * report as Done. Once the completion is submitted (status done), photos
+ * are locked — admin verification needs the evidence intact.
+ */
+export async function removeEvidencePhoto(
+  reportId: string,
+  photoId: string
+): Promise<ActionResult> {
+  const supabase = await createClient();
+  const profile = await requireProfile();
+  if (profile.role !== "department" && profile.role !== "barangay") {
+    return { ok: false, error: "Not permitted" };
+  }
+
+  const { data: report } = await supabase
+    .from("reports")
+    .select("status")
+    .eq("id", reportId)
+    .maybeSingle();
+  const status = (report as { status?: ReportStatus } | null)?.status;
+  if (status !== "in_progress" && status !== "assigned") {
+    return { ok: false, error: "Photos are locked once the work is submitted for verification." };
+  }
+
+  const { data: photo } = await supabase
+    .from("report_photos")
+    .select("id, storage_path")
+    .eq("id", photoId)
+    .eq("report_id", reportId)
+    .eq("kind", "resolution")
+    .maybeSingle();
+  const row = photo as { id: string; storage_path: string } | null;
+  if (!row) return { ok: false, error: "Photo not found." };
+
+  // remove the asset, then the catalog row
+  await cleanupReportPhoto(row.storage_path);
+  const { error } = await supabase.from("report_photos").delete().eq("id", photoId);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true };
+}
+
 export async function uploadEvidencePhoto(
   reportId: string,
   file: File
@@ -305,6 +378,121 @@ export async function uploadEvidencePhoto(
     .from("report_photos")
     .insert({ report_id: reportId, storage_path: path, kind: "resolution" });
   if (rowErr) console.error("report_photos insert failed:", rowErr.message);
+
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* Citizen: follow / unfollow a report (boosts its priority)           */
+/* ------------------------------------------------------------------ */
+
+export async function toggleFollow(
+  reportId: string
+): Promise<ActionResult & { following?: boolean }> {
+  const supabase = await createClient();
+  const profile = await requireProfile();
+
+  const { data: existing } = await supabase
+    .from("report_follows")
+    .select("user_id")
+    .eq("report_id", reportId)
+    .eq("user_id", profile.id)
+    .maybeSingle();
+
+  if (existing) {
+    const { error } = await supabase
+      .from("report_follows")
+      .delete()
+      .eq("report_id", reportId)
+      .eq("user_id", profile.id);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath(`/reports/${reportId}`);
+    return { ok: true, following: false };
+  }
+
+  const { error } = await supabase
+    .from("report_follows")
+    .insert({ report_id: reportId, user_id: profile.id });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true, following: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* Citizen: follow up own report — alerts admins at any status         */
+/* ------------------------------------------------------------------ */
+
+export async function addFollowup(
+  reportId: string,
+  message: string
+): Promise<ActionResult> {
+  const trimmed = message.trim();
+  if (!trimmed) return { ok: false, error: "Write a message first." };
+  if (trimmed.length > 1000) return { ok: false, error: "Keep it under 1000 characters." };
+
+  const supabase = await createClient();
+  const profile = await requireProfile();
+
+  const { data: owned } = await supabase
+    .from("reports")
+    .select("id, user_id")
+    .eq("id", reportId)
+    .maybeSingle();
+  const report = owned as { id: string; user_id: string } | null;
+  if (!report || report.user_id !== profile.id) {
+    return { ok: false, error: "Only the reporter can follow up." };
+  }
+
+  // the DB trigger alerts every admin
+  const { error } = await supabase.from("report_followups").insert({
+    report_id: reportId,
+    user_id: profile.id,
+    message: trimmed,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/reports/${reportId}`);
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* Citizen: rate a resolved report (1–5 stars + comment)               */
+/* ------------------------------------------------------------------ */
+
+export async function submitFeedback(
+  reportId: string,
+  rating: number,
+  comment: string
+): Promise<ActionResult> {
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return { ok: false, error: "Pick a rating from 1 to 5 stars." };
+  }
+
+  const supabase = await createClient();
+  const profile = await requireProfile();
+
+  const { data: owned } = await supabase
+    .from("reports")
+    .select("id, user_id, status")
+    .eq("id", reportId)
+    .maybeSingle();
+  const report = owned as { id: string; user_id: string; status: string } | null;
+  if (!report || report.user_id !== profile.id) {
+    return { ok: false, error: "Only the reporter can leave feedback." };
+  }
+  if (report.status !== "resolved") {
+    return { ok: false, error: "Feedback opens once the report is resolved." };
+  }
+
+  // RLS double-checks resolved+owner; the trigger alerts admins
+  const { error } = await supabase.from("report_feedback").insert({
+    report_id: reportId,
+    user_id: profile.id,
+    rating,
+    comment: comment.trim() || null,
+  });
+  if (error) return { ok: false, error: error.message };
 
   revalidatePath(`/reports/${reportId}`);
   return { ok: true };

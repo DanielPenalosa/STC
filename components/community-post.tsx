@@ -28,8 +28,10 @@ const STATUS_PILL: Record<ReportStatus, string> = {
   verified: "bg-primary-50 text-primary-700",
   assigned: "bg-accent-50 text-accent-700",
   in_progress: "bg-warn-50 text-warn-700",
+  done: "bg-primary-50 text-primary-700",
   resolved: "bg-success-50 text-success-700",
   closed: "bg-slate-100 text-slate-500",
+  rejected: "bg-danger-50 text-danger-700",
 };
 
 const STATUS_DOT: Record<ReportStatus, string> = {
@@ -38,8 +40,10 @@ const STATUS_DOT: Record<ReportStatus, string> = {
   verified: "bg-primary-500",
   assigned: "bg-accent-500",
   in_progress: "bg-warn-500",
+  done: "bg-primary-500",
   resolved: "bg-success-500",
   closed: "bg-slate-400",
+  rejected: "bg-danger-500",
 };
 
 export type CommunityPostData = {
@@ -48,7 +52,7 @@ export type CommunityPostData = {
   title: string;
   description: string;
   status: ReportStatus;
-  priority: string;
+  priority: number;
   authorName: string | null;
   authorInitial: string;
   categoryName: string | null;
@@ -145,7 +149,7 @@ export function CommunityPost({ post }: { post: CommunityPostData }) {
               {post.categoryName}
             </span>
           )}
-          {post.priority === "high" && (
+          {post.priority >= 4 && (
             <span className="flex items-center gap-1 text-xs font-semibold text-danger-600">
               <Icon name="alert" size="sm" /> Urgent
             </span>

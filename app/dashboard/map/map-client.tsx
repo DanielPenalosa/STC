@@ -22,7 +22,7 @@ export type MapReport = {
   ref_code: string;
   title: string;
   status: ReportStatus;
-  priority: string;
+  priority: number;
   latitude: number | null;
   longitude: number | null;
   created_at: string;
@@ -41,8 +41,10 @@ const STATUS_LEGEND: { key: ReportStatus; label: string; color: string }[] = [
   { key: "verified", label: "Verified", color: "#06ABEA" },
   { key: "assigned", label: "Assigned", color: "#2333A0" },
   { key: "in_progress", label: "In Progress", color: "#eab308" },
+  { key: "done", label: "Pending Verification", color: "#5c6cc9" },
   { key: "resolved", label: "Resolved", color: "#2E8254" },
   { key: "closed", label: "Closed", color: "#334155" },
+  { key: "rejected", label: "Rejected", color: "#DF1B2C" },
 ];
 
 const statusColor = (s: string) =>
@@ -62,8 +64,10 @@ const STATUS_TILE: Record<ReportStatus, { bg: string; text: string }> = {
   verified: { bg: "bg-accent-50", text: "text-accent-700" },
   assigned: { bg: "bg-primary-50", text: "text-primary-700" },
   in_progress: { bg: "bg-warn-50", text: "text-warn-700" },
+  done: { bg: "bg-primary-50", text: "text-primary-700" },
   resolved: { bg: "bg-success-50", text: "text-success-700" },
   closed: { bg: "bg-slate-100", text: "text-slate-500" },
+  rejected: { bg: "bg-danger-50", text: "text-danger-700" },
 };
 
 export default function MapClient({

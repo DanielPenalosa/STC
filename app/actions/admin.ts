@@ -107,7 +107,7 @@ export async function setReportStatus(
 
 export async function setPriority(
   reportId: string,
-  priority: "low" | "medium" | "high"
+  priority: 1 | 2 | 3 | 4 | 5
 ): Promise<ActionResult> {
   await requireAdmin();
   const supabase = await createClient();
@@ -123,6 +123,39 @@ export async function setPriority(
 
 export async function verifyReport(reportId: string): Promise<ActionResult> {
   return setReportStatus(reportId, "verified");
+}
+
+/**
+ * Lifecycle v2 verification step — the department marked the report Done
+ * with a completion photo; the admin either:
+ *  - approves  → status Resolved (trigger notifies citizen + followers)
+ *  - sends back → status In Progress (trigger notifies the department)
+ */
+export async function approveCompletion(
+  reportId: string,
+  note?: string
+): Promise<ActionResult> {
+  return setReportStatus(reportId, "resolved", note);
+}
+
+export async function requestRevision(
+  reportId: string,
+  note: string
+): Promise<ActionResult> {
+  if (!note.trim()) {
+    return { ok: false, error: "Tell the department what needs fixing." };
+  }
+  return setReportStatus(reportId, "in_progress", `Revision requested: ${note.trim()}`);
+}
+
+export async function rejectReport(
+  reportId: string,
+  reason: string
+): Promise<ActionResult> {
+  if (!reason.trim()) {
+    return { ok: false, error: "Give the citizen a reason." };
+  }
+  return setReportStatus(reportId, "rejected", `Rejected: ${reason.trim()}`);
 }
 
 export async function deleteReport(reportId: string): Promise<ActionResult> {

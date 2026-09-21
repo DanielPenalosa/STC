@@ -84,15 +84,45 @@ export default function SubmitReportClient({
   const [aiBusy, setAiBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // server-side storage ids for photos already uploaded this session —
+  // keyed by index so each thumbnail can be cancelled individually
+  const [uploadedPaths, setUploadedPaths] = useState<(string | null)[]>([]);
+  const [uploadingCount, setUploadingCount] = useState(0);
 
   async function onPhotoSelected(fileList: FileList | null) {
     const arr = Array.from(fileList ?? []);
     setFiles(arr);
-    setPreviews(arr.map((f) => URL.createObjectURL(f)));
+    setPreviews((prev) => [...prev, ...arr.map((f) => URL.createObjectURL(f))]);
+    setUploadedPaths((prev) => [...prev, ...arr.map(() => null)]);
+
+    // upload each photo NOW (not on submit) so it can be cancelled
+    // individually before the report goes in
+    for (let i = 0; i < arr.length; i++) {
+      const idx = files.length + i;
+      setUploadingCount((c) => c + 1);
+      void (async () => {
+        try {
+          const compressed = await compressImage(arr[i]);
+          const path = `pending/${Date.now()}-${compressed.name}`;
+          const fd = new FormData();
+          fd.append("file", compressed);
+          fd.append("path", path);
+          const upRes = await fetch("/api/upload-photo", { method: "POST", body: fd });
+          const upJson = await upRes.json().catch(() => ({}));
+          if (!upRes.ok || !upJson.ok) throw new Error(upJson.error ?? "upload failed");
+          const serverPath = String(upJson.path ?? path);
+          setUploadedPaths((prev) => prev.map((v, j) => (j === idx ? serverPath : v)));
+        } catch {
+          // keep the local file — submit will retry the upload
+        } finally {
+          setUploadingCount((c) => Math.max(0, c - 1));
+        }
+      })();
+    }
 
     const first = arr[0];
-    if (!first) {
-      setAi(null);
+    if (!first || files.length > 0) {
+      if (!first) setAi(null);
       return;
     }
     setAiBusy(true);
@@ -121,6 +151,21 @@ export default function SubmitReportClient({
     } finally {
       setAiBusy(false);
     }
+  }
+
+  /** Remove one photo before submitting: cancel button on each thumbnail. */
+  async function removePhoto(idx: number) {
+    const serverPath = uploadedPaths[idx];
+    if (serverPath) {
+      // already on the server — delete it there (own pending folder only)
+      void fetch(`/api/delete-photo?path=${encodeURIComponent(serverPath)}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
+    setPreviews((prev) => prev.filter((_, i) => i !== idx));
+    setUploadedPaths((prev) => prev.filter((_, i) => i !== idx));
+    if (idx === 0) setAi(null); // AI pre-check was based on the first photo
   }
 
   /**
@@ -232,23 +277,27 @@ export default function SubmitReportClient({
     try {
       const photoPaths: string[] = [];
       const photoHashes: string[] = [];
-      for (const f of files) {
-        // shrink on-device first (5 MB phone photo → ~300 KB) — cuts storage
-        // and upload time ~10x on either backend
-        const compressed = await compressImage(f);
-        const path = `pending/${Date.now()}-${compressed.name}`;
-        const fd = new FormData();
-        fd.append("file", compressed);
-        fd.append("path", path);
-        const upRes = await fetch("/api/upload-photo", { method: "POST", body: fd });
-        const upJson = await upRes.json().catch(() => ({}));
-        if (!upRes.ok || !upJson.ok) {
-          throw new Error(upJson.error ?? "Photo upload failed");
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        // reuse the upload made on selection; only upload if missing
+        // (cancelled or failed earlier uploads are retried here)
+        const existing = uploadedPaths[i];
+        if (existing) {
+          photoPaths.push(existing);
+        } else {
+          const compressed = await compressImage(f);
+          const path = `pending/${Date.now()}-${compressed.name}`;
+          const fd = new FormData();
+          fd.append("file", compressed);
+          fd.append("path", path);
+          const upRes = await fetch("/api/upload-photo", { method: "POST", body: fd });
+          const upJson = await upRes.json().catch(() => ({}));
+          if (!upRes.ok || !upJson.ok) {
+            throw new Error(upJson.error ?? "Photo upload failed");
+          }
+          photoPaths.push(String(upJson.path ?? path));
         }
-        // the SERVER decides the storage id ("cld:..." on Cloudinary) —
-        // the local path is only a folder hint, never the DB reference
-        photoPaths.push(String(upJson.path ?? path));
-        photoHashes.push(await sha256Hex(await compressed.arrayBuffer()));
+        photoHashes.push(await sha256Hex(await f.arrayBuffer()));
       }
 
       const res = await createReport({
@@ -317,13 +366,32 @@ export default function SubmitReportClient({
           {previews.length > 0 && (
             <div className="flex gap-2 overflow-x-auto pb-1">
               {previews.map((src, i) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={i}
-                  src={src}
-                  alt="preview"
-                  className="h-20 w-20 shrink-0 rounded-xl border border-slate-200 object-cover"
-                />
+                <div key={i} className="group relative shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt="preview"
+                    className={`h-20 w-20 rounded-xl border object-cover ${
+                      uploadedPaths[i] ? "border-slate-200" : "border-dashed border-warn-300"
+                    }`}
+                  />
+                  {/* still uploading indicator */}
+                  {!uploadedPaths[i] && !submitting && (
+                    <span className="absolute inset-x-1 bottom-1 truncate rounded bg-black/60 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
+                      uploading…
+                    </span>
+                  )}
+                  {/* cancel — removes the photo (and the uploaded copy) */}
+                  <button
+                    type="button"
+                    onClick={() => void removePhoto(i)}
+                    aria-label="Remove photo"
+                    title="Remove photo"
+                    className="press absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-800 text-white shadow-md transition hover:bg-danger-500"
+                  >
+                    <Icon name="close" size="sm" />
+                  </button>
+                </div>
               ))}
             </div>
           )}

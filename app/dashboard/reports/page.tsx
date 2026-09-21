@@ -1,7 +1,9 @@
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { requireProfile } from "@/lib/data";
 import { PageHeader } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { scopeFor, applyScope } from "@/lib/scope";
 import DateRangePicker from "@/components/date-range-picker";
 import AutoSubmitSelect from "@/components/auto-submit-select";
 import ReportsTable from "./table";
@@ -12,10 +14,11 @@ const STATUS_TABS: { key: string; label: string }[] = [
   { key: "all", label: "All" },
   { key: "submitted", label: "Submitted" },
   { key: "under_review", label: "Under Review" },
-  { key: "verified", label: "Verified" },
   { key: "assigned", label: "Assigned" },
   { key: "in_progress", label: "In Progress" },
+  { key: "done", label: "Pending Verification" },
   { key: "resolved", label: "Resolved" },
+  { key: "rejected", label: "Rejected" },
   { key: "closed", label: "Closed" },
 ];
 
@@ -35,15 +38,20 @@ export default async function AdminReportsPage({
 }) {
   const sp = await searchParams;
   const supabase = await createClient();
+  const profile = await requireProfile();
+  const scope = scopeFor(profile);
 
-  let query = supabase
-    .from("reports")
-    .select(
-      `*, profiles:users!reports_user_id_fkey(full_name), categories(id, name, icon), barangays(id, name), departments(name),
+  let query = applyScope(
+    supabase
+      .from("reports")
+      .select(
+        `*, profiles:users!reports_user_id_fkey(full_name), categories(id, name, icon), barangays(id, name), departments(name),
        report_photos(storage_path, kind)`
-    )
-    .order("created_at", { ascending: false })
-    .limit(300);
+      )
+      .order("created_at", { ascending: false })
+      .limit(300),
+    scope
+  );
   if (sp.status && sp.status !== "all") query = query.eq("status", sp.status);
   if (sp.category) query = query.eq("category_id", sp.category);
   if (sp.barangay) query = query.eq("barangay_id", sp.barangay);
@@ -143,7 +151,11 @@ export default async function AdminReportsPage({
     <div className="space-y-4">
       <PageHeader
         title="Reports"
-        subtitle="View and manage all community reports submitted by citizens"
+        subtitle={
+          scope.isStaff
+            ? `Reports handled by your ${scope.role} — citizens' accounts stay hidden`
+            : "View and manage all community reports submitted by citizens"
+        }
         action={
           activeFilters > 0 ? (
             <a
@@ -194,11 +206,13 @@ export default async function AdminReportsPage({
             placeholder="All types"
             options={categories.map((c) => ({ value: c.id, label: c.name }))}
           />
-          <AutoSubmitSelect
-            param="barangay"
-            placeholder="All barangays"
-            options={barangays.map((b) => ({ value: b.id, label: b.name }))}
-          />
+          {!scope.isStaff && (
+            <AutoSubmitSelect
+              param="barangay"
+              placeholder="All barangays"
+              options={barangays.map((b) => ({ value: b.id, label: b.name }))}
+            />
+          )}
           <DateRangePicker />
         </Suspense>
       </div>

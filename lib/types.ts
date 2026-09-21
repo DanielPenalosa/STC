@@ -90,11 +90,35 @@ export type Report = {
   is_possible_duplicate?: boolean;
   created_at: string;
   updated_at: string;
+  resolved_at?: string | null;
+  completed_at?: string | null;
   // joined helpers
   profiles?: Profile | null;
   categories?: Category | null;
   barangays?: Barangay | null;
   departments?: Department | null;
+};
+
+export type ReportFollow = {
+  report_id: string;
+  user_id: string;
+  created_at: string;
+};
+
+export type ReportFollowup = {
+  id: string;
+  report_id: string;
+  user_id: string;
+  message: string;
+  created_at: string;
+};
+
+export type ReportFeedback = {
+  report_id: string;
+  user_id: string;
+  rating: number;
+  comment: string | null;
+  created_at: string;
 };
 
 export type ReportPhoto = {

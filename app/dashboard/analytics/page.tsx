@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
+import { requireProfile } from "@/lib/data";
 import { PageHeader } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
 import { StatusBadge } from "@/components/ui";
+import { scopeFor, applyScope } from "@/lib/scope";
 import Charts from "./charts";
 import type { Report } from "@/lib/types";
 import type { ReportStatus } from "@/lib/constants";
@@ -10,12 +12,18 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
+  const profile = await requireProfile();
+  const scope = scopeFor(profile);
+
   const [reportsRes, usersRes] = await Promise.all([
-    supabase
-      .from("reports")
-      .select("id, status, priority, created_at, user_id, category_id, categories(name), barangays(name), departments(name)")
-      .order("created_at", { ascending: false })
-      .limit(1000),
+    applyScope(
+      supabase
+        .from("reports")
+        .select("id, status, priority, created_at, user_id, category_id, categories(name), barangays(name), departments(name)")
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      scope
+    ),
     supabase
       .from("users")
       .select("id, full_name, role, is_active, created_at")
@@ -88,11 +96,16 @@ export default async function AnalyticsPage() {
   /* ===== user activity feed ===== */
   const activeUsers = users.filter((u) => u.is_active).slice(0, 5);
 
+  const unitCount = scope.isStaff ? 1 : activeDepartments;
   return (
     <div className="space-y-4">
       <PageHeader
         title="Analytics"
-        subtitle="Overview of system activity and key statistics"
+        subtitle={
+          scope.isStaff
+            ? `Activity and key statistics for your ${scope.role}`
+            : "Overview of system activity and key statistics"
+        }
       />
 
       {/* ===== KPI cards ===== */}
@@ -114,8 +127,8 @@ export default async function AnalyticsPage() {
         <Kpi
           icon="building"
           tone="warn"
-          label="Departments"
-          value={activeDepartments}
+          label={scope.isStaff ? (scope.role === "barangay" ? "Your Barangay" : "Your Department") : "Departments"}
+          value={unitCount}
           delta={null}
         />
         <Kpi

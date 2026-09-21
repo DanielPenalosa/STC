@@ -10,7 +10,7 @@ export type ExportRow = {
   barangay: string;
   department: string;
   status: string;
-  priority: string;
+  priority: number;
   date: string;
 };
 
@@ -23,7 +23,7 @@ function downloadCsv(rows: ExportRow[]) {
   const lines = [
     header.map(csvEscape).join(","),
     ...rows.map((r) =>
-      [r.ref, r.title, r.category, r.barangay, r.department, r.status, r.priority, r.date]
+      [r.ref, r.title, r.category, r.barangay, r.department, r.status, String(r.priority), r.date]
         .map(csvEscape)
         .join(",")
     ),
@@ -70,7 +70,7 @@ export default function ExportMenu({ rows }: { rows: ExportRow[] }) {
           <td>${esc(r.barangay)}</td>
           <td>${esc(r.department)}</td>
           <td>${esc(r.status)}</td>
-          <td>${esc(r.priority)}</td>
+          <td>${esc(String(r.priority))}</td>
           <td>${esc(r.date)}</td>
         </tr>`
       )

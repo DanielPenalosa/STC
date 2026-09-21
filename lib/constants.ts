@@ -6,18 +6,26 @@ export type ReportStatus =
   | "verified"
   | "assigned"
   | "in_progress"
+  | "done"
   | "resolved"
-  | "closed";
+  | "closed"
+  | "rejected";
 
-export type Priority = "low" | "medium" | "high";
+export type Priority = 1 | 2 | 3 | 4 | 5;
 
-/** Status flow: Submitted → Under Review → Verified → Assigned → In Progress → Resolved → Closed */
+/**
+ * Lifecycle v2:
+ * Submitted → Under Review → Assigned → In Progress → Done → Resolved
+ *                   └─ Rejected (end state)
+ * "Done" = department submitted completion; admin then verifies:
+ * approve → Resolved · needs revision → back to In Progress
+ */
 export const STATUS_FLOW: ReportStatus[] = [
   "submitted",
   "under_review",
-  "verified",
   "assigned",
   "in_progress",
+  "done",
   "resolved",
   "closed",
 ];
@@ -28,8 +36,10 @@ export const STATUS_LABELS: Record<ReportStatus, string> = {
   verified: "Verified",
   assigned: "Assigned",
   in_progress: "In Progress",
+  done: "Pending Verification",
   resolved: "Resolved",
   closed: "Closed",
+  rejected: "Rejected",
 };
 
 export const STATUS_COLORS: Record<ReportStatus, string> = {
@@ -38,8 +48,10 @@ export const STATUS_COLORS: Record<ReportStatus, string> = {
   verified: "bg-accent-100 text-accent-800",
   assigned: "bg-primary-100 text-primary-800",
   in_progress: "bg-accent-100 text-accent-800",
+  done: "bg-primary-100 text-primary-800",
   resolved: "bg-success-100 text-success-800",
   closed: "bg-slate-200 text-slate-600",
+  rejected: "bg-danger-100 text-danger-800",
 };
 
 export const STATUS_DOTS: Record<ReportStatus, string> = {
@@ -48,15 +60,35 @@ export const STATUS_DOTS: Record<ReportStatus, string> = {
   verified: "bg-accent-500",
   assigned: "bg-primary-600",
   in_progress: "bg-accent-500",
+  done: "bg-primary-500",
   resolved: "bg-success-600",
   closed: "bg-slate-600",
+  rejected: "bg-danger-500",
+};
+
+export const PRIORITY_LABELS: Record<Priority, string> = {
+  1: "Normal",
+  2: "Low",
+  3: "Medium",
+  4: "High",
+  5: "Critical",
 };
 
 export const PRIORITY_COLORS: Record<Priority, string> = {
-  low: "bg-slate-100 text-slate-600",
-  medium: "bg-warn-100 text-warn-800",
-  high: "bg-danger-100 text-danger-800",
+  1: "bg-slate-100 text-slate-600",
+  2: "bg-sky-100 text-sky-800",
+  3: "bg-warn-100 text-warn-800",
+  4: "bg-danger-100 text-danger-800",
+  5: "bg-danger-600 text-white",
 };
+
+/** Follower-count thresholds that auto-boost a report's priority. */
+export const PRIORITY_THRESHOLDS: { min: number; priority: Priority }[] = [
+  { min: 20, priority: 5 },
+  { min: 10, priority: 4 },
+  { min: 5, priority: 3 },
+  { min: 2, priority: 2 },
+];
 
 export const ROLE_LABELS: Record<Role, string> = {
   citizen: "Citizen",

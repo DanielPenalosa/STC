@@ -18,7 +18,29 @@ export default function ProcessBar({
   /** bare = no card chrome (embed inside another card) */
   bare?: boolean;
 }) {
-  const current = STATUS_FLOW.indexOf(status);
+  // Rejected isn't a step in the flow — it can happen from review onward.
+  // Show the stepper frozen at Under Review with a rejected flag.
+  const rejected = status === "rejected";
+  const effective = rejected ? ("under_review" as ReportStatus) : status;
+  const current = STATUS_FLOW.indexOf(effective);
+
+  if (rejected) {
+    return (
+      <div className={bare ? "" : "rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm sm:p-4"}>
+        <div className="flex items-center gap-2.5 rounded-lg bg-danger-50 px-3.5 py-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-danger-600 text-white">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </span>
+          <div>
+            <p className="text-sm font-bold text-danger-700">Report rejected</p>
+            <p className="text-xs text-danger-600/80">This report was not accepted for action. See the timeline for the reason.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={bare ? "" : "rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm sm:p-4"}>
