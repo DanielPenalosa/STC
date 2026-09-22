@@ -5,3 +5,10 @@ out/
 .env*.local
 *.tsbuildinfo
 .vercel
+
+# local AI model cache (CLIP via Transformers.js)
+.transformers-cache/
+
+# local tooling state
+.freebuff/
+.vscode/

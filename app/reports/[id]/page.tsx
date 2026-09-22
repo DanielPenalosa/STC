@@ -618,6 +618,11 @@ export default async function ReportDetailPage({
                 suggested_department_id: ai.suggested_department_id,
                 suggested_barangay_id: ai.suggested_barangay_id,
                 confidence: ai.confidence,
+                urgency: ai.urgency,
+                reason: ai.reason,
+                handling_level: ai.handling_level,
+                auto_assigned: ai.auto_assigned ?? false,
+                admin_decision: ai.admin_decision,
                 status: ai.status,
               }}
             />

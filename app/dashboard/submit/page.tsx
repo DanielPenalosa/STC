@@ -10,7 +10,7 @@ export default async function SubmitPage() {
     <SubmitReportClient
       categories={categories
         .filter((c) => c.is_active)
-        .map((c) => ({ id: c.id, name: c.name, icon: c.icon }))}
+        .map((c) => ({ id: c.id, name: c.name, slug: c.slug }))}
       profile={{ full_name: profile.full_name }}
     />
   );

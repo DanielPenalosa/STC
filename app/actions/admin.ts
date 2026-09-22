@@ -307,7 +307,7 @@ export async function overrideAi(
     barangayId?: string | null;
   }
 ): Promise<ActionResult> {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const supabase = await createClient();
   const { error } = await supabase
     .from("reports")
@@ -319,9 +319,15 @@ export async function overrideAi(
     .eq("id", reportId);
   if (error) return { ok: false, error: error.message };
 
+  // record the admin's decision on the AI recommendation
   await supabase
     .from("ai_analysis")
-    .update({ status: "reviewed" })
+    .update({
+      status: "reviewed",
+      admin_decision: "overridden",
+      decided_by: admin.id,
+      decided_at: new Date().toISOString(),
+    })
     .eq("report_id", reportId)
     .in("status", ["completed", "low_confidence", "pending"]);
 
@@ -331,7 +337,7 @@ export async function overrideAi(
 }
 
 export async function acceptAiSuggestion(reportId: string): Promise<ActionResult> {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const supabase = await createClient();
 
   const { data: ai } = await supabase
@@ -374,9 +380,15 @@ export async function acceptAiSuggestion(reportId: string): Promise<ActionResult
     .eq("id", reportId);
   if (error) return { ok: false, error: error.message };
 
+  // record the admin's decision on the AI recommendation
   await supabase
     .from("ai_analysis")
-    .update({ status: "reviewed" })
+    .update({
+      status: "reviewed",
+      admin_decision: "accepted",
+      decided_by: admin.id,
+      decided_at: new Date().toISOString(),
+    })
     .eq("report_id", reportId);
 
   revalidatePath("/dashboard/ai");
@@ -385,11 +397,16 @@ export async function acceptAiSuggestion(reportId: string): Promise<ActionResult
 }
 
 export async function markAiReviewed(reportId: string): Promise<ActionResult> {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const supabase = await createClient();
   await supabase
     .from("ai_analysis")
-    .update({ status: "reviewed" })
+    .update({
+      status: "reviewed",
+      admin_decision: "manual",
+      decided_by: admin.id,
+      decided_at: new Date().toISOString(),
+    })
     .eq("report_id", reportId);
   revalidatePath("/dashboard/ai");
   return { ok: true };

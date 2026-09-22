@@ -43,6 +43,14 @@ export async function createReport(
     };
   }
 
+  // photo evidence is mandatory — at least one successfully uploaded photo
+  if (!input.photoPaths.length) {
+    return {
+      ok: false,
+      error: "A photo is required before a report can be submitted.",
+    };
+  }
+
   // Barangay is resolved SERVER-SIDE from GPS coordinates — the citizen
   // never selects it manually. Two passes: configured centers, then
   // OpenStreetMap reverse geocode (auto-creates unmapped barangays).

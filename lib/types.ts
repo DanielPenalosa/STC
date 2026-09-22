@@ -48,6 +48,8 @@ export type Category = {
   icon: string;
   is_active: boolean;
   default_department_id: string | null;
+  /** AI routing default: barangay first response vs municipal department */
+  handling_level: "barangay" | "municipal" | null;
 };
 
 export type Barangay = {
@@ -183,6 +185,18 @@ export type AiAnalysis = {
   suggested_barangay_id: string | null;
   detected_issue: string | null;
   confidence: number | null;
+  /** low | medium | high | critical (local AI) */
+  urgency: "low" | "medium" | "high" | "critical" | null;
+  /** short human-readable explanation of the result */
+  reason: string | null;
+  /** barangay vs municipal routing decision */
+  handling_level: "barangay" | "municipal" | null;
+  /** whether the pipeline created an assignment automatically */
+  auto_assigned: boolean | null;
+  /** final admin decision on the recommendation */
+  admin_decision: "pending" | "accepted" | "overridden" | "manual" | null;
+  decided_by: string | null;
+  decided_at: string | null;
   model_used: string;
   raw_response: Record<string, unknown>;
   status: "pending" | "completed" | "low_confidence" | "reviewed" | "failed";

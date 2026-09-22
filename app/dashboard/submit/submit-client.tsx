@@ -1,14 +1,101 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { compressImage } from "@/lib/compress";
 import { createReport } from "@/app/actions/reports";
-import { btn, inputCls, labelCls, Card } from "@/components/ui";
+import { btn, inputCls, Card } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { CONFIDENCE_THRESHOLD } from "@/lib/constants";
 
-type Opt = { id: string; name: string };
+type Opt = { id: string; name: string; slug?: string };
+
+/** "Water leak / pipe break" + "Malanday" → "Water leak / pipe break — Malanday". */
+function makeTitle(issue: string, place: string | null): string {
+  const base = issue.charAt(0).toUpperCase() + issue.slice(1);
+  const seg = (place ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)[0];
+  return seg ? `${base} — ${seg}` : base;
+}
+
+/** First two comma segments of an OSM display name — compact address. */
+function shortAddress(name: string): string {
+  return name
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(", ");
+}
+
+/** Stages shown in the "Analyzing report…" card (reference-style checklist). */
+const ANALYZE_STEPS: { label: string }[] = [
+  { label: "Upload image securely" },
+  { label: "Analyzing image" },
+  { label: "Identifying infrastructure" },
+  { label: "Checking location" },
+  { label: "Determining responsible office" },
+  { label: "Preparing report" },
+];
+
+/** Office display names for the "Assigned to" row, by department slug hint. */
+const OFFICE_NAMES: Record<string, string> = {
+  environment: "MENRO",
+  disaster: "MDRRMO",
+  engineering: "Engineering Office",
+  utilities: "Utilities Office",
+  "public-safety": "Public Safety Office",
+};
+
+const URGENCY_CHIP: Record<string, string> = {
+  critical: "bg-danger-600 text-white",
+  high: "bg-danger-100 text-danger-700",
+  medium: "bg-warn-100 text-warn-700",
+  low: "bg-slate-100 text-slate-600",
+};
+
+/** Human severity wording for the Severity row (medium → "Moderate"). */
+const SEVERITY_LABELS: Record<string, string> = {
+  critical: "Critical",
+  high: "High",
+  medium: "Moderate",
+  low: "Low",
+};
+
+/** Friendly message for a failed photo quality check. */
+function photoQualityMessage(reason: string | null | undefined): string {
+  switch (reason) {
+    case "too_blurry":
+      return "The photo is blurry — the AI couldn't read it clearly.";
+    case "too_dark":
+      return "The photo is too dark to analyze.";
+    case "too_bright":
+      return "The photo is overexposed — too much glare to analyze.";
+    default:
+      return "The photo couldn't be analyzed.";
+  }
+}
+
+/** Label/value row used in the AI result card. */
+function DetailRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <dt className="shrink-0 text-xs font-medium text-slate-400">{label}</dt>
+      <dd className="min-w-0 text-right text-[13px] font-semibold text-slate-800">
+        {children}
+      </dd>
+    </div>
+  );
+}
 
 /** SHA-256 of file bytes, hex — used for duplicate-photo detection. */
 async function sha256Hex(buf: ArrayBuffer): Promise<string> {
@@ -26,6 +113,26 @@ type DetectionState =
   | { phase: "denied" }
   | { phase: "timeout" }
   | { phase: "unsupported" };
+
+/** Shape of the pre-submission AI result shown in the card. */
+type AiPrecheck = {
+  detected_issue: string;
+  urgency: "low" | "medium" | "high" | "critical" | null;
+  confidence: number;
+  reason: string | null;
+  needs_review: boolean;
+  needs_review_reason: string | null;
+  secondary_issues: string[];
+  /** routing suggestion for the "Assigned to" row (advisory) */
+  level: "barangay" | "municipal" | null;
+  office: string | null;
+  /** short problem text for the "Problem" row, e.g. "Sanitation/health concern" */
+  problem: string | null;
+  /** photo quality gate from the analyzer — ok:false means blurry/dark/unreadable */
+  photoQuality: { ok: boolean; reason: string | null } | null;
+  /** analyzer judged the photo as unrelated to any civic/infrastructure issue */
+  unrelated: boolean;
+};
 
 function Section({
   n,
@@ -69,18 +176,44 @@ export default function SubmitReportClient({
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [addressText, setAddressText] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [detection, setDetection] = useState<DetectionState>({ phase: "idle" });
+  const [detection, setDetectionState] = useState<DetectionState>({ phase: "idle" });
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
-  const [ai, setAi] = useState<{
-    detected_issue: string;
-    description: string | null;
-    suggested_category_id: string | null;
-    confidence: number;
-    needs_review: boolean;
-    needs_review_reason: string | null;
-    secondary_issues: string[];
-  } | null>(null);
+  const [ai, setAi] = useState<AiPrecheck | null>(null);
+  const [analyzeStep, setAnalyzeStep] = useState(0);
+  /** bumped when the first photo is removed — invalidates in-flight analysis */
+  const analyzeToken = useRef(0);
+  /** one silent auto-location attempt per page load (retry stays manual) */
+  const autoLocated = useRef(false);
+  /** mirror of detection state — readable inside async callbacks without staleness */
+  const detectionRef = useRef<DetectionState>({ phase: "idle" });
+  /** detected issue from the latest AI run — feeds the title auto-fill */
+  const aiIssueRef = useRef<string | null>(null);
+  /** hidden file input — focused programmatically by "Replace photo" */
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /** keep detectionRef in sync so async flows can read the latest phase */
+  function setDetection(d: DetectionState) {
+    detectionRef.current = d;
+    setDetectionState(d);
+  }
+
+  /**
+   * Auto-fill the title once BOTH the AI issue and the location are in —
+   * the citizen only writes the description. Never overwrites typed text.
+   */
+  function autoFillTitle() {
+    const issue = aiIssueRef.current;
+    if (!issue) return; // AI result not in yet — GPS path calls this again
+    const d = detectionRef.current;
+    const place =
+      d.phase === "detected"
+        ? d.label
+        : d.phase === "outside"
+          ? (d.placeName ?? null)
+          : null;
+    setTitle((t) => (t.trim() ? t : makeTitle(issue, place)));
+  }
   const [aiBusy, setAiBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,29 +259,101 @@ export default function SubmitReportClient({
       return;
     }
     setAiBusy(true);
+    setAnalyzeStep(0);
+    const token = ++analyzeToken.current;
+
+    // kick off GPS detection in parallel with the photo analysis — the
+    // citizen never taps "Detect my barangay" (manual retry still exists)
+    if (detectionRef.current.phase === "idle" && !autoLocated.current) {
+      startGpsDetection({ auto: true });
+    }
+    const started = Date.now();
+    let response: Record<string, unknown> | null = null;
+    const stepTimer = setInterval(() => {
+      setAnalyzeStep((s) => Math.min(s + 1, ANALYZE_STEPS.length - 1));
+    }, 1300);
     try {
       const fd = new FormData();
       fd.append("photo", first);
       fd.append("description", description);
       const res = await fetch("/api/analyze", { method: "POST", body: fd });
       const json = await res.json();
-      if (json.ok) {
-        setAi({
-          detected_issue: json.detected_issue,
-          description: json.description ?? null,
-          suggested_category_id: json.suggested_category_id ?? null,
-          confidence: json.confidence ?? 0,
-          needs_review: Boolean(json.needs_review),
-          needs_review_reason: json.needs_review_reason ?? null,
-          secondary_issues: Array.isArray(json.secondary_issues) ? json.secondary_issues : [],
-        });
-        if (json.suggested_category_id && !categoryId) {
-          setCategoryId(json.suggested_category_id);
-        }
+      if (json.ok || json.detected_issue) {
+        response = json;
       }
     } catch {
       // AI is advisory — ignore failures
     } finally {
+      // let the checklist run its full animation before the result swaps in
+      const elapsed = Date.now() - started;
+      await new Promise((r) => setTimeout(r, Math.max(0, 2600 - elapsed)));
+      clearInterval(stepTimer);
+      if (token !== analyzeToken.current) return; // photo removed mid-analysis
+      if (response) {
+        // flash every step green for a beat, then show the result
+        setAnalyzeStep(ANALYZE_STEPS.length);
+        await new Promise((r) => setTimeout(r, 650));
+        const hint =
+          typeof response.suggested_department === "string"
+            ? response.suggested_department
+            : null;
+        const rawReason = (response.reason as string | null) ?? null;
+        // "Flagged medium — sanitation/health concern." → "Sanitation/health concern"
+        const problem = rawReason?.startsWith("Flagged")
+          ? (rawReason.split("—")[1] ?? "").trim().replace(/\.$/, "")
+          : null;
+        setAi({
+          detected_issue: String(response.detected_issue),
+          urgency:
+            response.urgency === "low" ||
+            response.urgency === "medium" ||
+            response.urgency === "high" ||
+            response.urgency === "critical"
+              ? response.urgency
+              : null,
+          confidence: Number(response.confidence ?? 0),
+          reason: rawReason,
+          needs_review: Boolean(response.needs_review),
+          needs_review_reason: (response.needs_review_reason as string | null) ?? null,
+          secondary_issues: Array.isArray(response.secondary_issues)
+            ? (response.secondary_issues as string[])
+            : [],
+          level:
+            response.suggested_level === "barangay" || response.suggested_level === "municipal"
+              ? (response.suggested_level as "barangay" | "municipal")
+              : null,
+          office: hint ? (OFFICE_NAMES[hint] ?? hint) : null,
+          problem: problem ? problem.charAt(0).toUpperCase() + problem.slice(1) : null,
+          photoQuality:
+            response.quality && typeof response.quality === "object"
+              ? {
+                  ok: Boolean((response.quality as { ok?: boolean }).ok),
+                  reason:
+                    ((response.quality as { reason?: string | null }).reason ??
+                      null) ?? null,
+                }
+              : null,
+          unrelated: Boolean(response.unrelated),
+        });
+
+        // auto-fill — title from issue + location, category from the issue map
+        // (skipped when the photo is unrelated — nothing worth pre-filling)
+        const unrelated = Boolean(response.unrelated);
+        aiIssueRef.current = unrelated ? null : String(response.detected_issue);
+        const slug =
+          !unrelated && typeof response.suggested_category_slug === "string"
+            ? response.suggested_category_slug
+            : null;
+        if (slug) {
+          const hit =
+            categories.find((c) => c.slug === slug) ??
+            categories.find(
+              (c) => c.slug && (slug.includes(c.slug) || c.slug.includes(slug))
+            );
+          if (hit) setCategoryId((cur) => cur ?? hit.id);
+        }
+        autoFillTitle();
+      }
       setAiBusy(false);
     }
   }
@@ -165,7 +370,13 @@ export default function SubmitReportClient({
     setFiles((prev) => prev.filter((_, i) => i !== idx));
     setPreviews((prev) => prev.filter((_, i) => i !== idx));
     setUploadedPaths((prev) => prev.filter((_, i) => i !== idx));
-    if (idx === 0) setAi(null); // AI pre-check was based on the first photo
+    if (idx === 0) {
+      // AI pre-check was based on the first photo — kill it everywhere
+      analyzeToken.current++;
+      setAiBusy(false);
+      setAnalyzeStep(0);
+      setAi(null);
+    }
   }
 
   /**
@@ -182,7 +393,10 @@ export default function SubmitReportClient({
    * for a few seconds and keep the most accurate fix (stopping early once
    * it's good), then send THAT one to detection.
    */
-  function useGps() {
+  function startGpsDetection(opts?: { auto?: boolean }) {
+    // auto mode: silent one-shot attempt fired when the first photo lands —
+    // the citizen sees the permission prompt but never has to tap anything
+    if (opts?.auto) autoLocated.current = true;
     if (!navigator.geolocation) {
       setDetection({ phase: "unsupported" });
       return;
@@ -244,6 +458,7 @@ export default function SubmitReportClient({
       if (json.ok && json.barangay_id) {
         const street =
           typeof json.display_name === "string" ? json.display_name : null;
+        if (street) setAddressText((a) => (a.trim() ? a : shortAddress(street)));
         setDetection({
           phase: "detected",
           barangayId: json.barangay_id,
@@ -253,6 +468,10 @@ export default function SubmitReportClient({
             undefined,
         });
       } else if (json.ok && json.reason === "outside") {
+        if (json.place_name)
+          setAddressText((a) =>
+            a.trim() ? a : shortAddress(String(json.place_name))
+          );
         setDetection({
           phase: "outside",
           coords: { lat: latitude, lng: longitude },
@@ -268,6 +487,8 @@ export default function SubmitReportClient({
     } catch {
       setDetection({ phase: "outside", coords: { lat: latitude, lng: longitude } });
     }
+    // location just resolved — title auto-fill may now complete
+    autoFillTitle();
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -301,7 +522,13 @@ export default function SubmitReportClient({
       }
 
       const res = await createReport({
-        title,
+        // title is auto-filled from the AI result + GPS; fall back to the
+        // description / detected address if the analysis never ran
+        title:
+          title.trim() ||
+          description.trim().slice(0, 60) ||
+          addressText?.split(",")[0]?.trim() ||
+          "Community report",
         description,
         categoryId,
         latitude: coords?.lat ?? null,
@@ -319,11 +546,6 @@ export default function SubmitReportClient({
       setSubmitting(false);
     }
   }
-
-  const inputShell =
-    "flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 transition focus-within:border-primary-400 focus-within:ring-4 focus-within:ring-primary-50";
-  const field =
-    "w-full bg-transparent py-2.5 text-sm outline-none placeholder:text-slate-300";
 
   return (
     <div className="mx-auto max-w-lg space-y-4">
@@ -354,6 +576,7 @@ export default function SubmitReportClient({
               Clear, well-lit photos get better AI results
             </span>
             <input
+              ref={fileInputRef}
               type="file"
               accept="image/*"
               multiple
@@ -396,190 +619,232 @@ export default function SubmitReportClient({
             </div>
           )}
 
-          {aiBusy && (
-            <p className="flex items-center gap-2 text-sm text-primary-600">
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
-              AI is analyzing your photo…
-            </p>
+          {/* relevance gate — photo shows nothing related to civic issues */}
+          {ai?.unrelated && (
+            <div className="flex items-start gap-3 rounded-2xl border border-warn-300 bg-warn-50/80 p-3.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warn-100 text-warn-600">
+                <Icon name="alert" size="md" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-warn-800">
+                  This photo doesn&apos;t look related to a community issue
+                </p>
+                <p className="mt-0.5 text-xs leading-relaxed text-warn-700/90">
+                  Upload a photo of the actual problem — damaged roads,
+                  garbage, leaks, broken streetlights, and similar. Reports
+                  need clear evidence of the issue itself, so you can&apos;t
+                  submit until this photo is replaced.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`${btn.primary} press mt-2.5 px-3.5 py-2 text-xs`}
+                >
+                  <Icon name="camera" size="sm" /> Upload a related photo
+                </button>
+              </div>
+            </div>
           )}
 
-          {ai && !aiBusy && (
-            <div className="rounded-xl border border-primary-100 bg-primary-50/60 p-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <p className="flex items-center gap-1.5 text-sm font-bold text-primary-800">
-                  <Icon name="robot" size="md" />
-                  {ai.detected_issue}
+          {/* quality gate — analyzer flagged the photo as unusable */}
+          {ai?.photoQuality && !ai.photoQuality.ok && (
+            <div className="flex items-start gap-3 rounded-2xl border border-warn-300 bg-warn-50/80 p-3.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warn-100 text-warn-600">
+                <Icon name="alert" size="md" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-warn-800">
+                  Please upload a new, clear photo
                 </p>
-                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-primary-700">
-                  {Math.round(ai.confidence * 100)}%
+                <p className="mt-0.5 text-xs leading-relaxed text-warn-700/90">
+                  {photoQualityMessage(ai.photoQuality.reason)} Hold the phone
+                  steady, get closer, and make sure the area is well lit.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`${btn.primary} press mt-2.5 px-3.5 py-2 text-xs`}
+                >
+                  <Icon name="camera" size="sm" /> Replace with a clear photo
+                </button>
+              </div>
+            </div>
+          )}
+
+          {aiBusy && (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="px-4 pt-4 pb-3 text-center">
+                <p className="text-base font-extrabold tracking-tight text-slate-900">
+                  Analyzing report…
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                  AI is identifying the problem. Hang tight — this takes a few
+                  seconds.
+                </p>
+              </div>
+              <div className="relative h-56 w-full overflow-hidden bg-slate-100">
+                {previews[0] && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previews[0]}
+                    alt="Photo being analyzed"
+                    className="h-full w-full object-cover"
+                  />
+                )}
+                <span className="absolute bottom-2 right-2 rounded-full bg-slate-900/70 px-2 py-0.5 text-[10px] font-bold text-white">
+                  ✦ AI
+                </span>
+                <span className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-slate-200/50">
+                  <span className="block h-full w-1/3 animate-[analyze-sweep_1.4s_ease-in-out_infinite] bg-primary-500" />
                 </span>
               </div>
-              {ai.description && (
-                <p className="mt-1 text-xs italic leading-relaxed text-primary-700/80">
-                  “{ai.description}”
+              <ul className="space-y-2.5 px-4 py-4">
+                {ANALYZE_STEPS.map((s, i) => {
+                  const done = i < analyzeStep;
+                  const active = i === analyzeStep;
+                  return (
+                    <li key={s.label} className="flex items-center gap-2.5">
+                      {done ? (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-success-500 text-white">
+                          <Icon name="check" size="sm" strokeWidth={3} />
+                        </span>
+                      ) : active ? (
+                        <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+                      ) : (
+                        <span className="h-5 w-5 shrink-0 rounded-full border-2 border-slate-200" />
+                      )}
+                      <span
+                        className={`text-[13px] ${
+                          done
+                            ? "font-medium text-slate-500"
+                            : active
+                              ? "font-semibold text-slate-800"
+                              : "text-slate-300"
+                        }`}
+                      >
+                        {s.label}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {ai && !aiBusy && !ai.unrelated && (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="px-4 pt-4 text-center">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                    ai.needs_review || ai.confidence < CONFIDENCE_THRESHOLD
+                      ? "bg-warn-100 text-warn-700"
+                      : "bg-success-50 text-success-700"
+                  }`}
+                >
+                  {ai.needs_review || ai.confidence < CONFIDENCE_THRESHOLD ? (
+                    <>
+                      <Icon name="alert" size="sm" /> {Math.round(ai.confidence * 100)}% confidence
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="check-circle" size="sm" /> {Math.round(ai.confidence * 100)}% confidence
+                    </>
+                  )}
+                </span>
+                <p className="mt-1.5 text-lg font-extrabold tracking-tight text-slate-900">
+                  {ai.detected_issue}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  Report detected — please confirm before submission.
+                </p>
+              </div>
+              <div className="relative mt-3 h-56 w-full overflow-hidden bg-slate-100">
+                {previews[0] && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previews[0]}
+                    alt="Analyzed photo"
+                    className="h-full w-full object-cover"
+                  />
+                )}
+                <span className="absolute bottom-2 right-2 rounded-full bg-slate-900/70 px-2 py-0.5 text-[10px] font-bold text-white">
+                  ✦ AI
+                </span>
+              </div>
+              <dl className="divide-y divide-slate-100 px-4 py-1">
+                <DetailRow label="Object">{ai.detected_issue}</DetailRow>
+                <DetailRow label="Problem">
+                  {ai.problem ?? "See description below"}
+                </DetailRow>
+                <DetailRow label="Location">
+                  {detection.phase === "detected" ? (
+                    <>
+                      {detection.label} <Icon name="check" size="sm" className="inline text-success-500" strokeWidth={3} />
+                    </>
+                  ) : detection.phase === "locating" || detection.phase === "idle" ? (
+                    <span className="inline-flex items-center gap-1.5 text-slate-400">
+                      <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-primary-400 border-t-transparent" />
+                      Auto-detecting…
+                    </span>
+                  ) : (
+                    // the only visible control left — retry detection inline
+                    <button
+                      type="button"
+                      onClick={() => startGpsDetection()}
+                      className="text-warn-600 underline decoration-dotted underline-offset-2"
+                    >
+                      Not detected — tap to retry
+                    </button>
+                  )}
+                </DetailRow>
+                <DetailRow label="GPS">
+                  {coords ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : "—"}
+                </DetailRow>
+                <DetailRow label="Assigned to">
+                  {ai.office
+                    ? `${ai.office} (suggested)`
+                    : ai.level === "municipal"
+                      ? "Municipal office (suggested)"
+                      : "Barangay office (suggested)"}
+                </DetailRow>
+                <DetailRow label="Severity">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${URGENCY_CHIP[ai.urgency ?? "low"]}`}
+                  >
+                    {SEVERITY_LABELS[ai.urgency ?? ""] ?? "Moderate"}
+                  </span>
+                </DetailRow>
+              </dl>
+              {ai.reason && (
+                <p className="border-t border-slate-100 px-4 py-2.5 text-xs leading-relaxed text-slate-500">
+                  <span className="font-semibold text-slate-600">Why:</span> {ai.reason}
                 </p>
               )}
-              <p className="mt-1 text-xs text-primary-700/80">
-                Suggested:{" "}
-                {categories.find((c) => c.id === ai.suggested_category_id)?.name ?? "—"}
-              </p>
               {ai.secondary_issues.length > 0 && (
-                <p className="mt-1 text-[11px] text-primary-600/80">
+                <p className="px-4 pb-1 text-[11px] text-slate-400">
                   Also spotted: {ai.secondary_issues.join(", ")}
                 </p>
               )}
-              {(ai.needs_review || ai.confidence < 0.6) && (
-                <p className="mt-1 text-[11px] text-warn-600">
+              {(ai.needs_review || ai.confidence < CONFIDENCE_THRESHOLD) && (
+                <p className="flex items-start gap-1.5 bg-warn-50/60 px-4 py-2.5 text-[11px] leading-relaxed text-warn-700">
+                  <Icon name="alert" size="sm" className="mt-0.5 shrink-0" />
                   {ai.needs_review_reason ?? "Low confidence"} — an admin will double-check the classification.
                 </p>
               )}
-              <p className="mt-1.5 text-[11px] leading-snug text-primary-500/80">
-                Suggestion only — you can change the category below.
+              <p className="border-t border-slate-100 px-4 py-2.5 text-[11px] leading-snug text-slate-400">
+                Everything above was detected from your photo — just add a
+                description below and submit.
               </p>
             </div>
           )}
         </Section>
 
-        {/* step 2 — details */}
-        <Section n="2" title="Details" hint="What's happening?">
-          <div>
-            <label className={labelCls} htmlFor="title">Title</label>
-            <div className={inputShell}>
-              <input id="title" required maxLength={120} className={field}
-                value={title} onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Leaking water pipe on Mabini St." />
-            </div>
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="description">Description</label>
-            <textarea id="description" required rows={4} className={inputCls}
-              value={description} onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe the issue, when you noticed it, and anything helpful for responders." />
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="category">Category</label>
-            <select id="category" className={inputCls} value={categoryId ?? ""}
-              onChange={(e) => setCategoryId(e.target.value || null)}>
-              <option value="">— Select (AI may suggest one) —</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-        </Section>
-
-        {/* step 3 — location */}
-        <Section n="3" title="Location" hint="Your barangay is detected automatically">
-          <button type="button" onClick={useGps}
-            className={`press flex w-full items-center gap-3 rounded-xl border p-3.5 text-left transition ${
-              detection.phase === "detected"
-                ? "border-success-200 bg-success-50/60"
-                : detection.phase === "outside" || detection.phase === "denied" || detection.phase === "timeout" || detection.phase === "unsupported"
-                ? "border-warn-200 bg-warn-50/50"
-                : "border-slate-200 bg-white hover:bg-slate-50"
-            }`}>
-            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-              detection.phase === "detected"
-                ? "bg-success-100 text-success-600"
-                : detection.phase === "locating"
-                ? "bg-primary-50 text-primary-600"
-                : "bg-slate-50 text-slate-400"
-            }`}>
-              <Icon name={detection.phase === "locating" ? "crosshair" : detection.phase === "detected" ? "check-circle" : "pin"} size="md" />
-            </span>
-            <span className="min-w-0 flex-1">
-              {detection.phase === "idle" && (
-                <>
-                  <span className="block text-sm font-semibold text-slate-700">
-                    Detect my barangay
-                  </span>
-                  <span className="block text-xs text-slate-400">
-                    Uses your GPS — no manual selection needed
-                  </span>
-                </>
-              )}
-              {detection.phase === "locating" && (
-                <>
-                  <span className="block text-sm font-semibold text-slate-700">
-                    Finding your location…
-                  </span>
-                  <span className="block text-xs text-slate-400">
-                    Allow location access when prompted
-                  </span>
-                </>
-              )}
-              {detection.phase === "detected" && (
-                <>
-                  <span className="block text-sm font-semibold text-success-700">
-                    {detection.label}
-                  </span>
-                  <span className="block text-xs text-success-600/80">
-                    {detection.accuracyNote ?? "Detected from your GPS coordinates"}
-                  </span>
-                </>
-              )}
-              {detection.phase === "outside" && (
-                <>
-                  <span className="block text-sm font-semibold text-warn-700">
-                    {detection.placeName
-                      ? `Location captured — ${detection.placeName}`
-                      : "Location captured — area not yet mapped"}
-                  </span>
-                  <span className="block text-xs text-warn-600/90">
-                    {detection.coords.lat.toFixed(5)}, {detection.coords.lng.toFixed(5)} · submit anyway and staff will assign the right barangay
-                  </span>
-                </>
-              )}
-              {detection.phase === "denied" && (
-                <>
-                  <span className="block text-sm font-semibold text-warn-700">
-                    Location access denied
-                  </span>
-                  <span className="block text-xs text-warn-600/90">
-                    Enable GPS or describe the location below — the admin will route it
-                  </span>
-                </>
-              )}
-              {detection.phase === "timeout" && (
-                <>
-                  <span className="block text-sm font-semibold text-warn-700">
-                    Couldn&apos;t get an accurate location
-                  </span>
-                  <span className="block text-xs text-warn-600/90">
-                    Move to an open area and tap again, or describe the location below
-                  </span>
-                </>
-              )}
-              {detection.phase === "unsupported" && (
-                <>
-                  <span className="block text-sm font-semibold text-warn-700">
-                    GPS not available on this device
-                  </span>
-                  <span className="block text-xs text-warn-600/90">
-                    Describe the location below — the admin will route it
-                  </span>
-                </>
-              )}
-            </span>
-            {detection.phase === "detected" && (
-              <Icon name="check-circle" size="md" className="shrink-0 text-success-500" />
-            )}
-          </button>
-          <p className="text-[11px] leading-relaxed text-slate-400">
-            Tip: GPS works best outdoors. We wait a few seconds for an accurate
-            fix before detecting your barangay — if it&apos;s still wrong, tap to
-            retry.
-          </p>
-
-          <div>
-            <label className={labelCls} htmlFor="address">Address / landmark</label>
-            <div className={inputShell}>
-              <Icon name="pin" size="md" className="shrink-0 text-slate-300" />
-              <input id="address" className={field} value={addressText}
-                onChange={(e) => setAddressText(e.target.value)}
-                placeholder="e.g. Near the corner of Rizal Ave." />
-            </div>
-          </div>
+        {/* step 2 — description. Title, category, barangay and GPS are
+            all detected automatically; this is the only field left. */}
+        <Section n="2" title="Description" hint="The only thing we need from you">
+          <textarea id="description" required rows={4} className={inputCls}
+            value={description} onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the issue — what's happening, when you noticed it, and anything helpful for responders." />
         </Section>
 
         {error && (
@@ -589,9 +854,34 @@ export default function SubmitReportClient({
           </p>
         )}
 
-        <button type="submit" disabled={submitting} className={`${btn.primary} press w-full py-3`}>
-          {submitting ? "Submitting…" : "Submit report"}
-          {!submitting && <Icon name="send" size="md" />}
+        {/* hard requirement — a report cannot go in without a photo */}
+        {files.length === 0 && (
+          <p className="flex items-center gap-2 rounded-xl bg-warn-50 px-3.5 py-2.5 text-sm font-medium text-warn-700">
+            <Icon name="alert" size="md" className="shrink-0" />
+            A photo is required — take or choose one above to enable submit.
+          </p>
+        )}
+        {ai?.unrelated && (
+          <p className="flex items-center gap-2 rounded-xl bg-warn-50 px-3.5 py-2.5 text-sm font-medium text-warn-700">
+            <Icon name="alert" size="md" className="shrink-0" />
+            Submission is locked — replace the photo with a related one first.
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={submitting || files.length === 0 || Boolean(ai?.unrelated)}
+          className={`${btn.primary} press w-full py-3`}
+        >
+          {submitting
+            ? "Submitting…"
+            : files.length === 0
+              ? "Add a photo to submit"
+              : ai?.unrelated
+                ? "Upload a related photo to submit"
+                : "Submit report"}
+          {!submitting && files.length > 0 && !ai?.unrelated && (
+            <Icon name="send" size="md" />
+          )}
         </button>
 
         <p className="text-center text-[11px] leading-relaxed text-slate-400">

@@ -1,9 +1,16 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { Card, PageHeader, EmptyState, btn } from "@/components/ui";
+import { Card, PageHeader, EmptyState } from "@/components/ui";
 import AiRowActions from "./row-actions";
 import { CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { AiAnalysis, Report } from "@/lib/types";
+
+const URGENCY_STYLES: Record<string, string> = {
+  critical: "bg-danger-600 text-white",
+  high: "bg-danger-100 text-danger-700",
+  medium: "bg-warn-100 text-warn-700",
+  low: "bg-slate-100 text-slate-600",
+};
 
 export default async function AiAnalysisPage() {
   const supabase = await createClient();
@@ -20,6 +27,7 @@ export default async function AiAnalysisPage() {
   })[]) ?? [];
 
   const pending = rows.filter((r) => r.status !== "reviewed");
+  const autoAssigned = rows.filter((r) => r.auto_assigned).length;
 
   return (
     <div className="space-y-4">
@@ -28,10 +36,14 @@ export default async function AiAnalysisPage() {
         subtitle="Review, accept or override AI recommendations"
       />
       <Card className="p-4 text-sm text-slate-600">
-        AI results are <strong>recommendations only</strong>. Suggestions below{" "}
+        AI results are <strong>recommendations only</strong> — produced by a
+        100% free, fully local model (CLIP zero-shot, no external API).
+        Suggestions below{" "}
         {Math.round(CONFIDENCE_THRESHOLD * 100)}% confidence are flagged{" "}
         <span className="rounded bg-warn-100 px-1.5 py-0.5 text-xs font-semibold text-warn-700">low_confidence</span>{" "}
-        and require manual review before assignment.
+        and are never auto-assigned. {autoAssigned > 0 && (
+          <>Currently <strong>{autoAssigned}</strong> recommendation{autoAssigned === 1 ? "" : "s"} auto-assigned pending your review.</>
+        )}
       </Card>
 
       {pending.length === 0 ? (
@@ -51,9 +63,26 @@ export default async function AiAnalysisPage() {
                       }`}>
                         {Math.round((row.confidence ?? 0) * 100)}% confidence
                       </span>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
-                        {row.status}
-                      </span>
+                      {row.urgency && (
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${URGENCY_STYLES[row.urgency] ?? "bg-slate-100 text-slate-600"}`}>
+                          {row.urgency.toUpperCase()}
+                        </span>
+                      )}
+                      {row.handling_level && (
+                        <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700">
+                          {row.handling_level === "municipal" ? "Municipal" : "Barangay"} level
+                        </span>
+                      )}
+                      {row.auto_assigned && (
+                        <span className="rounded-full bg-accent-100 px-2 py-0.5 text-xs font-semibold text-accent-800">
+                          auto-assigned
+                        </span>
+                      )}
+                      {row.status === "low_confidence" && (
+                        <span className="rounded-full bg-warn-100 px-2 py-0.5 text-xs font-semibold text-warn-700">
+                          needs review
+                        </span>
+                      )}
                     </div>
                     <Link href={`/reports/${row.report_id}`} className="mt-1 block font-semibold text-primary-700 hover:underline">
                       {row.reports?.title ?? "Report"}
@@ -61,7 +90,10 @@ export default async function AiAnalysisPage() {
                     <p className="mt-1 text-sm text-slate-600">
                       Detected: <strong>{row.detected_issue ?? "—"}</strong>
                     </p>
-                    <p className="text-xs text-slate-500">
+                    {row.reason && (
+                      <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{row.reason}</p>
+                    )}
+                    <p className="mt-1 text-xs text-slate-500">
                       Suggests: {row.reports?.categories?.name ?? "no category"} · {row.reports?.departments?.name ?? "no department"} · {row.reports?.barangays?.name ?? "no barangay"} · model {row.model_used}
                     </p>
                   </div>

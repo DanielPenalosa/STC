@@ -1,22 +1,38 @@
 import Link from "next/link";
 import { Logo, CLIENT_NAME, CITY_NAME, TAGLINE } from "./brand";
 import { Icon, type IconName } from "@/components/icons";
+import { Reveal } from "@/components/reveal";
 
 const FEATURES: { icon: IconName; title: string; text: string }[] = [
   {
     icon: "camera",
     title: "Snap & submit",
-    text: "Photo, description, category and GPS location in under a minute.",
+    text: "One photo, one description — filed in under a minute from any phone.",
   },
   {
     icon: "robot",
     title: "AI-assisted",
-    text: "Computer vision suggests the category, department and barangay.",
+    text: "Computer vision suggests the category, department and barangay for you.",
+  },
+  {
+    icon: "pin",
+    title: "GPS-located",
+    text: "Every report is pinned on the map so crews know exactly where to go.",
   },
   {
     icon: "bell",
-    title: "Stay updated",
-    text: "Realtime notifications as your report moves to Resolved.",
+    title: "Realtime updates",
+    text: "Get notified the moment your report is verified, assigned or resolved.",
+  },
+  {
+    icon: "check-circle",
+    title: "Accountability",
+    text: "Public status trail — nothing gets lost, everyone sees the progress.",
+  },
+  {
+    icon: "shield",
+    title: "Verified accounts",
+    text: "ID-verified residents keep the feed clean and reports trustworthy.",
   },
 ];
 
@@ -26,167 +42,376 @@ const STEPS: { n: string; title: string; text: string }[] = [
   { n: "03", title: "Resolve", text: "Track live status until the issue is marked resolved." },
 ];
 
+const STATS: { value: string; label: string; icon: IconName }[] = [
+  { value: "24/7", label: "Report anytime, anywhere", icon: "clock" },
+  { value: "<1 min", label: "Average time to file", icon: "camera" },
+  { value: "100%", label: "Reports tracked to resolution", icon: "check-circle" },
+];
+
+const FAQS: { q: string; a: string }[] = [
+  {
+    q: "Is it free to use?",
+    a: "Yes — creating an account and submitting reports is completely free for residents of the city or municipality.",
+  },
+  {
+    q: "What kinds of issues can I report?",
+    a: "Anything that affects public spaces: potholes, water leaks, broken streetlights, flooding, garbage and more.",
+  },
+  {
+    q: "How do I know my report was received?",
+    a: "You'll get a realtime notification at every stage — verified, assigned, in progress, and resolved.",
+  },
+  {
+    q: "Do I need to install an app?",
+    a: "No install needed — it works in any mobile browser. You can also add it to your home screen as a PWA.",
+  },
+];
+
 export default function Landing() {
   return (
-    <main className="flex min-h-screen flex-col bg-surface">
-      {/* ---------- header — blue chrome like the dashboard ---------- */}
-      <header
-        className="sticky top-0 z-40 h-[65px] border-b border-white/10 bg-navy bg-cover bg-center px-4 sm:px-6"
-        style={{ backgroundImage: "url('/blue-bg.jpg')" }}
-      >
-        <div className="flex h-full items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Logo size={34} className="sm:hidden" />
-            <Logo size={38} className="hidden sm:block" />
+    <main className="landing-fade flex min-h-screen flex-col bg-surface">
+      {/* ================= header ================= */}
+      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-5">
+          <Link href="/" className="flex items-center gap-3">
+            <Logo size={34} />
             <div>
-              <p className="text-xs font-bold leading-tight text-white sm:text-sm">{CLIENT_NAME}</p>
-              <p className="hidden text-xs text-primary-200 sm:block">{CITY_NAME}</p>
+              <p className="text-sm font-bold leading-tight text-slate-900">{CLIENT_NAME}</p>
+              <p className="text-xs text-slate-500">{CITY_NAME}</p>
             </div>
-          </div>
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          </Link>
+
+          <nav className="hidden items-center gap-7 text-sm font-medium text-slate-600 md:flex">
+            <a href="#how" className="transition hover:text-primary-600">How it works</a>
+            <a href="#features" className="transition hover:text-primary-600">Features</a>
+            <a href="#faq" className="transition hover:text-primary-600">FAQ</a>
+          </nav>
+
+          <div className="flex items-center gap-2">
             <Link
               href="/login"
-              className="press inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-primary-100 transition hover:bg-white/10 hover:text-white sm:px-4 sm:text-sm"
+              className="press hidden rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 sm:inline-flex"
             >
-              <Icon name="logout" size="md" className="hidden sm:block" />
               Sign in
             </Link>
             <Link
               href="/register"
-              className="press inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-2 text-xs font-semibold text-navy transition hover:bg-primary-50 sm:gap-1.5 sm:px-4 sm:text-sm"
+              className="press inline-flex items-center gap-1 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm shadow-primary-600/20 transition hover:bg-primary-700"
             >
-              <span>Get started</span>
-              <Icon name="chevron-right" size="md" />
+              Get started
+              <Icon name="chevron-right" size="sm" />
             </Link>
           </div>
         </div>
       </header>
 
-      {/* ---------- hero — photo background only here ---------- */}
-      <section
-        className="relative w-full bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: "url('/landing-bg.webp')" }}
-      >
-        {/* white veil for text readability */}
-        <div className="absolute inset-0 bg-white/75" aria-hidden="true" />
-        <div className="relative mx-auto w-full max-w-6xl px-4 pb-16 pt-12 text-center sm:px-5 sm:pb-20 sm:pt-24">
-        <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary-100 bg-primary-50 px-3.5 py-1.5 text-center text-xs font-semibold text-primary-700">
-          <Icon name="pin" size="sm" className="shrink-0" />
-          <span className="truncate">{TAGLINE}</span>
-        </span>
-        <h1 className="mx-auto mt-6 max-w-3xl text-3xl font-extrabold leading-[1.1] tracking-tight text-slate-900 sm:text-5xl md:text-6xl">
-          Report community issues.
-          <br />
-          <span className="text-primary-600">Track them to resolution.</span>
-        </h1>
-        <p className="mx-auto mt-5 max-w-xl text-base font-medium leading-relaxed text-slate-700">
-          Snap a photo, and AI helps classify the issue — potholes, leaks, broken
-          streetlights and more — routing it to the right department or barangay in{" "}
-          {CITY_NAME}.
-        </p>
-        <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
-          <Link
-            href="/register"
-            className="press inline-flex items-center gap-2 rounded-xl bg-primary-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-primary-600/25 hover:bg-primary-700"
-          >
-            Submit a report
-            <Icon name="chevron-right" size="md" />
-          </Link>
-          <Link
-            href="/login"
-            className="press inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
-          >
-            Staff sign in
-          </Link>
+      {/* ================= hero ================= */}
+      <section className="relative overflow-hidden">
+        {/* ambient background: soft brand-color orbs */}
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          <div className="float-slow absolute -top-32 right-[-10%] h-[26rem] w-[26rem] rounded-full bg-primary-100/60 blur-3xl" />
+          <div className="float-slow absolute top-40 left-[-12%] h-[22rem] w-[22rem] rounded-full bg-accent-100/50 blur-3xl [animation-delay:2s]" />
+          <div className="float-slow absolute bottom-[-8rem] right-1/3 h-[18rem] w-[18rem] rounded-full bg-success-100/40 blur-3xl [animation-delay:4s]" />
         </div>
-      </div>
-      </section>
 
-      {/* ---------- how it works ---------- */}
-      <section className="border-y border-slate-200/70 bg-white px-5 py-16">
-        <div className="mx-auto max-w-5xl">
-          <p className="text-center text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-            How it works
-          </p>
-          <div className="mt-10 grid gap-10 sm:grid-cols-3">
-            {STEPS.map((s, i) => (
-              <div key={s.n} className="relative text-center">
-                {i < STEPS.length - 1 && (
-                  <span className="absolute right-[-20%] top-6 hidden h-px w-[40%] bg-gradient-to-r from-slate-200 to-transparent sm:block" />
-                )}
-                <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-sm font-extrabold text-primary-600">
-                  {s.n}
-                </span>
-                <p className="mt-4 font-bold text-slate-900">{s.title}</p>
-                <p className="mx-auto mt-1.5 max-w-[26ch] text-sm leading-relaxed text-slate-500">
-                  {s.text}
-                </p>
+        <div className="relative mx-auto grid w-full max-w-6xl items-center gap-12 px-4 pb-20 pt-14 sm:px-5 lg:grid-cols-2 lg:pb-28 lg:pt-20">
+          {/* ---------- copy ---------- */}
+          <div className="text-center lg:text-left">
+            <span
+              className="hero-rise inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary-100 bg-primary-50 px-3.5 py-1.5 text-xs font-semibold text-primary-700"
+              style={{ animationDelay: "0.05s" }}
+            >
+              <Icon name="pin" size="sm" className="shrink-0" />
+              <span className="truncate">{TAGLINE}</span>
+            </span>
+
+            <h1
+              className="hero-rise mx-auto mt-6 max-w-xl text-4xl font-extrabold leading-[1.08] tracking-tight text-slate-900 lg:mx-0 lg:text-[3.4rem]"
+              style={{ animationDelay: "0.15s" }}
+            >
+              Report community issues.
+              <br />
+              <span className="bg-gradient-to-r from-primary-600 to-accent-500 bg-clip-text text-transparent">
+                Track them to resolution.
+              </span>
+            </h1>
+
+            <p
+              className="hero-rise mx-auto mt-5 max-w-lg text-base leading-relaxed text-slate-600 lg:mx-0"
+              style={{ animationDelay: "0.25s" }}
+            >
+              Snap a photo and AI helps classify the issue — potholes, leaks,
+              broken streetlights and more — routing it to the right department
+              or barangay in {CITY_NAME}.
+            </p>
+
+            <div
+              className="hero-rise mt-8 flex flex-wrap items-center justify-center gap-3 lg:justify-start"
+              style={{ animationDelay: "0.35s" }}
+            >
+              <Link
+                href="/register"
+                className="press inline-flex items-center gap-2 rounded-xl bg-primary-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-primary-600/25 hover:bg-primary-700"
+              >
+                Submit a report
+                <Icon name="chevron-right" size="md" />
+              </Link>
+              <Link
+                href="/login"
+                className="press inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Staff sign in
+              </Link>
+            </div>
+
+            {/* stats row */}
+            <div
+              className="hero-rise mt-12 grid grid-cols-3 gap-4 border-t border-slate-200/80 pt-6 lg:mt-14"
+              style={{ animationDelay: "0.45s" }}
+            >
+              {STATS.map((s) => (
+                <div key={s.label} className="text-center lg:text-left">
+                  <p className="text-xl font-extrabold text-slate-900 sm:text-2xl">{s.value}</p>
+                  <p className="mt-0.5 text-xs leading-snug text-slate-500">{s.label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ---------- visual: floating mock report card ---------- */}
+          <div className="hero-rise relative mx-auto w-full max-w-md lg:max-w-none" style={{ animationDelay: "0.4s" }}>
+            <div className="float-slow relative">
+              {/* radar ping behind the pin */}
+              <span className="ping-ring absolute left-1/2 top-6 -ml-10 h-20 w-20 rounded-full border-2 border-primary-400/60" aria-hidden />
+              <span
+                className="ping-ring absolute left-1/2 top-6 -ml-10 h-20 w-20 rounded-full border-2 border-primary-300/50"
+                style={{ animationDelay: "1.3s" }}
+                aria-hidden
+              />
+
+              <div className="relative rounded-3xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/10 sm:p-6">
+                {/* card header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="live-blink absolute inline-flex h-full w-full rounded-full bg-success-500" />
+                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-success-600" />
+                    </span>
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-success-700">
+                      Live
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-slate-400">#0427</span>
+                </div>
+
+                {/* photo placeholder */}
+                <div className="mt-4 flex h-36 items-center justify-center rounded-2xl border border-dashed border-primary-200 bg-primary-50/60">
+                  <Icon name="camera" size="xl" className="text-primary-400" />
+                </div>
+
+                {/* body */}
+                <div className="mt-4 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-slate-900">Broken streetlight</p>
+                    <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
+                      <Icon name="pin" size="sm" className="text-slate-400" />
+                      Brgy. Sampaguita, near the plaza
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-warn-50 px-2.5 py-1 text-[11px] font-bold text-warn-600 ring-1 ring-warn-200">
+                    In progress
+                  </span>
+                </div>
+
+                {/* progress */}
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400">
+                    <span>Report progress</span>
+                    <span>3 of 4 steps</span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                    <div className="bar-fill h-full rounded-full bg-gradient-to-r from-primary-500 to-accent-500" />
+                  </div>
+                </div>
+
+                {/* timeline */}
+                <div className="mt-5 space-y-2.5 border-t border-slate-100 pt-4">
+                  {[
+                    { label: "Report received", done: true },
+                    { label: "Verified by admin", done: true },
+                    { label: "Assigned to City Engineering", done: true },
+                    { label: "Marked resolved", done: false },
+                  ].map((row) => (
+                    <div key={row.label} className="flex items-center gap-2.5 text-xs">
+                      <span
+                        className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full ${
+                          row.done ? "bg-success-100 text-success-700" : "border border-dashed border-slate-300 text-slate-300"
+                        }`}
+                      >
+                        {row.done && <Icon name="check-circle" size="sm" strokeWidth={2.4} />}
+                      </span>
+                      <span className={row.done ? "text-slate-600" : "text-slate-400"}>
+                        {row.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ---------- features ---------- */}
-      <section className="mx-auto w-full max-w-5xl px-5 py-16">
-        <div className="grid gap-4 sm:grid-cols-3">
-          {FEATURES.map((f) => (
-            <div
-              key={f.title}
-              className="hover-lift rounded-2xl border border-slate-200 bg-white p-6"
-            >
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
-                <Icon name={f.icon} size="lg" />
-              </span>
-              <p className="mt-4 font-bold text-slate-900">{f.title}</p>
-              <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{f.text}</p>
+      {/* ================= how it works ================= */}
+      <Reveal>
+        <section id="how" className="border-y border-slate-200/70 bg-white px-5 py-16 sm:py-20">
+          <div className="mx-auto max-w-5xl">
+            <p className="reveal text-center text-[11px] font-bold uppercase tracking-[0.2em] text-primary-600">
+              How it works
+            </p>
+            <h2 className="reveal mx-auto mt-2 max-w-md text-center text-2xl font-extrabold text-slate-900 sm:text-3xl">
+              From photo to fix in three steps
+            </h2>
+
+            <div className="reveal-group mt-12 grid gap-10 sm:grid-cols-3">
+              {STEPS.map((s, i) => (
+                <div key={s.n} className="reveal relative text-center">
+                  {i < STEPS.length - 1 && (
+                    <span className="absolute right-[-20%] top-6 hidden h-px w-[40%] bg-gradient-to-r from-slate-200 to-transparent sm:block" />
+                  )}
+                  <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-sm font-extrabold text-primary-600 ring-1 ring-primary-100">
+                    {s.n}
+                  </span>
+                  <p className="mt-4 font-bold text-slate-900">{s.title}</p>
+                  <p className="mx-auto mt-1.5 max-w-[26ch] text-sm leading-relaxed text-slate-500">
+                    {s.text}
+                  </p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </section>
+          </div>
+        </section>
+      </Reveal>
 
-      {/* ---------- CTA band — same blue texture ---------- */}
-      <section className="px-5 pb-20">
-        <div
-          className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl bg-navy bg-cover bg-center px-8 py-14 text-center text-white"
-          style={{ backgroundImage: "url('/blue-bg.jpg')" }}
-        >
-          <div
-            className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full opacity-30 blur-3xl"
-            style={{ background: "radial-gradient(circle, #06ABEA, transparent 65%)" }}
-          />
-          <div
-            className="pointer-events-none absolute -bottom-24 -right-16 h-72 w-72 rounded-full opacity-20 blur-3xl"
-            style={{ background: "radial-gradient(circle, #2E8254, transparent 65%)" }}
-          />
-          <h2 className="relative text-2xl font-extrabold sm:text-3xl">
-            Ready to improve your community?
+      {/* ================= features ================= */}
+      <Reveal>
+        <section id="features" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-5 sm:py-20">
+          <p className="reveal text-center text-[11px] font-bold uppercase tracking-[0.2em] text-primary-600">
+            Features
+          </p>
+          <h2 className="reveal mx-auto mt-2 max-w-lg text-center text-2xl font-extrabold text-slate-900 sm:text-3xl">
+            Everything residents and staff need
           </h2>
-          <p className="relative mx-auto mt-2 max-w-md text-sm text-slate-400">
-            Join your neighbors in {CITY_NAME} — every report makes a difference.
-          </p>
-          <Link
-            href="/register"
-            className="press relative mt-7 inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-slate-900 hover:bg-slate-100"
-          >
-            Create your free account
-            <Icon name="chevron-right" size="md" />
-          </Link>
-        </div>
-      </section>
 
-      {/* ---------- footer — blue chrome ---------- */}
-      <footer
-        className="mt-auto border-t border-white/10 bg-navy bg-cover bg-center px-5 py-6"
-        style={{ backgroundImage: "url('/blue-bg.jpg')" }}
-      >
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 text-xs text-primary-200">
-          <p>
-            © {new Date().getFullYear()} {CLIENT_NAME} · {CITY_NAME}
+          <div className="reveal-group mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {FEATURES.map((f) => (
+              <div
+                key={f.title}
+                className="reveal hover-lift rounded-2xl border border-slate-200 bg-white p-6"
+              >
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
+                  <Icon name={f.icon} size="lg" />
+                </span>
+                <p className="mt-4 font-bold text-slate-900">{f.title}</p>
+                <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{f.text}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      </Reveal>
+
+      {/* ================= FAQ ================= */}
+      <Reveal>
+        <section id="faq" className="mx-auto w-full max-w-3xl px-4 pb-16 sm:px-5 sm:pb-20">
+          <p className="reveal text-center text-[11px] font-bold uppercase tracking-[0.2em] text-primary-600">
+            FAQ
           </p>
-          <div className="flex items-center gap-4">
-            <Link href="/install" className="transition hover:text-white">Install the app</Link>
-            <Link href="/login" className="transition hover:text-white">Staff portal</Link>
+          <h2 className="reveal mt-2 text-center text-2xl font-extrabold text-slate-900 sm:text-3xl">
+            Common questions
+          </h2>
+
+          <div className="reveal-group mt-8 space-y-3">
+            {FAQS.map((f) => (
+              <details
+                key={f.q}
+                className="reveal group rounded-2xl border border-slate-200 bg-white px-5 py-4 transition hover:border-primary-200"
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-semibold text-slate-800 [&::-webkit-details-marker]:hidden">
+                  {f.q}
+                  <Icon
+                    name="chevron-down"
+                    size="md"
+                    className="shrink-0 text-slate-400 transition-transform duration-200 group-open:rotate-180"
+                  />
+                </summary>
+                <p className="mt-3 text-sm leading-relaxed text-slate-500">{f.a}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+      </Reveal>
+
+      {/* ================= CTA band ================= */}
+      <Reveal>
+        <section className="px-4 pb-20 sm:px-5">
+          <div className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl bg-navy bg-cover bg-center px-8 py-14 text-center text-white sm:py-16" style={{ backgroundImage: "url('/blue-bg.jpg')" }}>
+            <div className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full opacity-30 blur-3xl" style={{ background: "radial-gradient(circle, #06ABEA, transparent 65%)" }} />
+            <div className="pointer-events-none absolute -bottom-24 -right-16 h-72 w-72 rounded-full opacity-20 blur-3xl" style={{ background: "radial-gradient(circle, #2E8254, transparent 65%)" }} />
+            <h2 className="relative text-2xl font-extrabold sm:text-3xl">
+              Ready to improve your community?
+            </h2>
+            <p className="relative mx-auto mt-2 max-w-md text-sm text-primary-200">
+              Join your neighbors in {CITY_NAME} — every report makes a difference.
+            </p>
+            <Link
+              href="/register"
+              className="press relative mt-7 inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-slate-900 hover:bg-slate-100"
+            >
+              Create your free account
+              <Icon name="chevron-right" size="md" />
+            </Link>
+          </div>
+        </section>
+      </Reveal>
+
+      {/* ================= footer ================= */}
+      <footer className="mt-auto border-t border-slate-200/70 bg-white px-4 py-10 sm:px-5">
+        <div className="mx-auto max-w-6xl">
+          <div className="flex flex-col items-start justify-between gap-8 sm:flex-row">
+            <div className="max-w-xs">
+              <div className="flex items-center gap-2.5">
+                <Logo size={30} />
+                <p className="text-sm font-bold text-slate-900">{CLIENT_NAME}</p>
+              </div>
+              <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                {TAGLINE} — helping residents and staff of {CITY_NAME} keep the
+                community safe, clean and moving.
+              </p>
+            </div>
+
+            <div className="flex gap-14">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Product</p>
+                <div className="mt-3 flex flex-col gap-2 text-sm text-slate-600">
+                  <a href="#how" className="transition hover:text-primary-600">How it works</a>
+                  <a href="#features" className="transition hover:text-primary-600">Features</a>
+                  <a href="#faq" className="transition hover:text-primary-600">FAQ</a>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Access</p>
+                <div className="mt-3 flex flex-col gap-2 text-sm text-slate-600">
+                  <Link href="/register" className="transition hover:text-primary-600">Create account</Link>
+                  <Link href="/login" className="transition hover:text-primary-600">Staff sign in</Link>
+                  <Link href="/install" className="transition hover:text-primary-600">Install the app</Link>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-10 flex flex-col items-start justify-between gap-2 border-t border-slate-100 pt-5 text-xs text-slate-400 sm:flex-row sm:items-center">
+            <p>© {new Date().getFullYear()} {CLIENT_NAME} · {CITY_NAME}</p>
+            <p>Report an issue · Track it · See it fixed</p>
           </div>
         </div>
       </footer>

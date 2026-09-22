@@ -18,6 +18,7 @@ export type IconName =
   | "user"
   | "inbox"
   | "wrench"
+  | "check"
   | "check-circle"
   | "shield"
   | "search"
@@ -131,6 +132,7 @@ const PATHS: Record<IconName, ReactNode> = {
   wrench: (
     <path d="M14.7 6.3a4.5 4.5 0 0 0 6 6L17 16l-4.7-4.7a4.5 4.5 0 0 0-6-6L9 8.6 4 13.6 8.4 18l5-5 2.7-2.7a4.5 4.5 0 0 0-1.4-4z" />
   ),
+  check: <path d="M20 6L9 17l-5-5" />,
   "check-circle": (
     <>
       <circle cx="12" cy="12" r="9" />

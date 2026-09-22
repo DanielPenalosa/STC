@@ -36,6 +36,11 @@ export default function AiCard({
     suggested_department_id: string | null;
     suggested_barangay_id: string | null;
     confidence: number | null;
+    urgency: "low" | "medium" | "high" | "critical" | null;
+    reason: string | null;
+    handling_level: "barangay" | "municipal" | null;
+    auto_assigned: boolean | null;
+    admin_decision: string | null;
     status: string;
   };
 }) {
@@ -83,6 +88,37 @@ export default function AiCard({
         <p>
           Detected: <strong>{ai.detected_issue ?? "—"}</strong>
         </p>
+
+        {(ai.urgency || ai.handling_level) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {ai.urgency && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                  ai.urgency === "critical"
+                    ? "bg-danger-600 text-white"
+                    : ai.urgency === "high"
+                      ? "bg-danger-100 text-danger-700"
+                      : ai.urgency === "medium"
+                        ? "bg-warn-100 text-warn-700"
+                        : "bg-slate-100 text-slate-600"
+                }`}
+              >
+                Urgency: {ai.urgency}
+              </span>
+            )}
+            {ai.handling_level && (
+              <span className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700">
+                {ai.handling_level === "municipal" ? "Municipal" : "Barangay"} level
+              </span>
+            )}
+            {ai.auto_assigned && (
+              <span className="rounded-full bg-accent-100 px-2 py-0.5 text-[11px] font-semibold text-accent-800">
+                auto-assigned
+              </span>
+            )}
+          </div>
+        )}
+        {ai.reason && <p className="text-xs leading-relaxed text-slate-500">{ai.reason}</p>}
 
         <button
           onClick={() => void run("ai-accept", () => acceptAiSuggestion(reportId))}
