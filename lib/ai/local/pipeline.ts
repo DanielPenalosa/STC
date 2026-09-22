@@ -33,10 +33,35 @@ export type LocalAiResult = {
   quality: { ok: boolean; reason?: string | null };
   /** photo has nothing to do with civic issues (selfie, food, screenshot…) */
   unrelated: boolean;
+  /**
+   * the ANALYSIS ITSELF failed (model load, inference crash, corrupt file) —
+   * distinct from quality:false. The UI must never tell the citizen their
+   * photo is bad when the truth is the AI couldn't run.
+   */
+  analysis_failed: boolean;
   needs_review: boolean;
   needs_review_reason: string | null;
   model_used: string;
 };
+
+function failedResult(error: string, model: string): LocalAiResult {
+  return {
+    ok: false,
+    issue: null,
+    issueKey: null,
+    secondary: [],
+    confidence: 0,
+    urgency: null,
+    routing: null,
+    suggestedCategorySlug: null,
+    quality: { ok: true }, // the photo was NOT judged bad — the analysis failed
+    unrelated: false,
+    analysis_failed: true,
+    needs_review: true,
+    needs_review_reason: `AI analysis is temporarily unavailable (${error}) — a staff member will review the photo manually.`,
+    model_used: model,
+  };
+}
 
 /** Run the local pipeline on raw image bytes. */
 export async function analyzePhotoLocally(input: {
@@ -53,27 +78,12 @@ export async function analyzePhotoLocally(input: {
 
   const clip = await clipClassify(input.imageBytes, labels);
 
-  if (!clip) {
-    return {
-      ok: false,
-      issue: null,
-      issueKey: null,
-      secondary: [],
-      confidence: 0,
-      urgency: null,
-      routing: null,
-      suggestedCategorySlug: null,
-      quality: { ok: false, reason: "undecodable" },
-      unrelated: false,
-      needs_review: true,
-      needs_review_reason:
-        "Photo could not be analyzed locally — flagged for manual review.",
-      model_used: "local:clip-vit-base-patch32",
-    };
+  if (clip.outcome === "failed") {
+    return failedResult(clip.error, clip.model);
   }
 
-  // quality gate — mirror the vision.ts behavior
-  if (!clip.quality.ok) {
+  // quality gate — the model judged the PHOTO unusable (dark/blurry/blown out)
+  if (clip.outcome === "quality" || !clip.quality.ok) {
     const reason =
       clip.quality.reason === "too_blurry"
         ? "Photo appears blurry — please retake it or submit for manual review."
@@ -91,6 +101,7 @@ export async function analyzePhotoLocally(input: {
       suggestedCategorySlug: null,
       quality: clip.quality,
       unrelated: false,
+      analysis_failed: false,
       needs_review: true,
       needs_review_reason: reason,
       model_used: clip.model,
@@ -123,6 +134,7 @@ export async function analyzePhotoLocally(input: {
       suggestedCategorySlug: null,
       quality: clip.quality,
       unrelated: true,
+      analysis_failed: false,
       needs_review: true,
       needs_review_reason:
         "The photo doesn't appear to show a community infrastructure issue — please upload a photo of the actual problem.",
@@ -130,12 +142,18 @@ export async function analyzePhotoLocally(input: {
     };
   }
 
-  // "no_issue" winning, or everything below threshold → needs review
+  // "no_issue" winning, or everything far below the winner → needs review.
+  // The old bar (score > 0.3) was too strict for CLIP's soft multi-label
+  // scores on real-world phone photos: genuine issues often score 0.2–0.5
+  // while unrelated prompts soak up the remaining probability mass.
   const meaningful = clip.results.filter(
-    (r) => r.key !== "no_issue" && r.key !== UNRELATED_KEY && r.score > 0.12
+    (r) => r.key !== "no_issue" && r.key !== UNRELATED_KEY && r.score > 0.08
   );
   const primary =
-    best && best.key !== "no_issue" && best.score > CONFIDENCE_THRESHOLD * 0.5
+    best &&
+    best.key !== "no_issue" &&
+    best.key !== UNRELATED_KEY &&
+    best.score > 0.15
       ? ISSUE_LABELS.find((l) => l.key === best.key) ?? null
       : null;
 
@@ -176,6 +194,7 @@ export async function analyzePhotoLocally(input: {
     suggestedCategorySlug: categorySlugForIssue(primary?.key),
     quality: clip.quality,
     unrelated: false,
+    analysis_failed: false,
     needs_review: needsReview,
     needs_review_reason: needsReview
       ? primary

@@ -132,6 +132,8 @@ type AiPrecheck = {
   photoQuality: { ok: boolean; reason: string | null } | null;
   /** analyzer judged the photo as unrelated to any civic/infrastructure issue */
   unrelated: boolean;
+  /** the analysis itself failed (model unavailable etc.) — never blame the photo */
+  analysisFailed: boolean;
 };
 
 function Section({
@@ -334,6 +336,7 @@ export default function SubmitReportClient({
                 }
               : null,
           unrelated: Boolean(response.unrelated),
+          analysisFailed: Boolean(response.analysis_failed),
         });
 
         // auto-fill — title from issue + location, category from the issue map
@@ -353,6 +356,24 @@ export default function SubmitReportClient({
           if (hit) setCategoryId((cur) => cur ?? hit.id);
         }
         autoFillTitle();
+      } else {
+        // request failed entirely (network, server cold-start, non-JSON) —
+        // same honest neutral state: never blame the photo, never block submit
+        setAi({
+          detected_issue: "Unrecognized",
+          urgency: null,
+          confidence: 0,
+          reason: null,
+          needs_review: true,
+          needs_review_reason: "AI analysis could not be reached — a staff member will review the photo manually.",
+          secondary_issues: [],
+          level: null,
+          office: null,
+          problem: null,
+          photoQuality: { ok: true, reason: null },
+          unrelated: false,
+          analysisFailed: true,
+        });
       }
       setAiBusy(false);
     }
@@ -646,8 +667,30 @@ export default function SubmitReportClient({
             </div>
           )}
 
-          {/* quality gate — analyzer flagged the photo as unusable */}
-          {ai?.photoQuality && !ai.photoQuality.ok && (
+          {/* analysis failure — the AI couldn't run. This is NOT the photo's
+              fault, so no retake demand: submission stays open (AI is
+              advisory) and a staff member reviews the photo manually. */}
+          {ai && !aiBusy && ai.analysisFailed && (
+            <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                <Icon name="alert" size="md" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-800">
+                  AI check unavailable right now
+                </p>
+                <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
+                  We couldn&apos;t analyze your photo — this is a temporary
+                  problem on our side, not with your photo. You can still
+                  submit the report below; a staff member will review the photo
+                  manually.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* quality gate — analyzer flagged the photo itself as unusable */}
+          {ai?.photoQuality && !ai.photoQuality.ok && !ai.analysisFailed && (
             <div className="flex items-start gap-3 rounded-2xl border border-warn-300 bg-warn-50/80 p-3.5">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warn-100 text-warn-600">
                 <Icon name="alert" size="md" />
@@ -731,7 +774,7 @@ export default function SubmitReportClient({
             </div>
           )}
 
-          {ai && !aiBusy && !ai.unrelated && (
+          {ai && !aiBusy && !ai.unrelated && !ai.analysisFailed && (
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="px-4 pt-4 text-center">
                 <span

@@ -139,7 +139,7 @@ export async function runLocalAnalysisForReport(
         : {
             ok: false, issue: null, issueKey: null, secondary: [], confidence: 0,
             urgency: null, routing: null, suggestedCategorySlug: null,
-            quality: { ok: false, reason: "unreadable" }, unrelated: false,
+            quality: { ok: true }, unrelated: false, analysis_failed: true,
             needs_review: true,
             needs_review_reason: "Photo could not be loaded for AI analysis — manual review required.",
             model_used: "local:clip-vit-base-patch32",
@@ -164,7 +164,7 @@ export async function runLocalAnalysisForReport(
       result = {
         ok: false, issue, issueKey: null, secondary: [], confidence: 0,
         urgency, routing, suggestedCategorySlug: null, unrelated: false,
-        quality: { ok: true },
+        quality: { ok: true }, analysis_failed: false,
         needs_review: true,
         needs_review_reason: "No photo attached — AI classified from text only. Manual review required.",
         model_used: "local:rules-only",

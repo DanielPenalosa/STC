@@ -56,6 +56,9 @@ export async function POST(request: Request) {
       quality: result.quality,
       // true when the photo shows nothing related to civic issues
       unrelated: result.unrelated,
+      // true when the ANALYSIS ITSELF failed (distinct from a bad photo —
+      // the client shows "AI unavailable, you can still submit" for this)
+      analysis_failed: result.analysis_failed,
       model_used: result.model_used,
       // routing suggestion for the "Assigned to" row — advisory only
       suggested_level: result.routing?.level ?? null,
