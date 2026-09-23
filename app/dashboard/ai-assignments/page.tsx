@@ -2,7 +2,6 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Card, PageHeader, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import AiRowActions from "./row-actions";
 import { CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { AiAnalysis, Report } from "@/lib/types";
 
@@ -13,7 +12,12 @@ const URGENCY_STYLES: Record<string, string> = {
   low: "bg-slate-100 text-slate-600",
 };
 
-export default async function AiAnalysisPage() {
+/**
+ * AI Auto-Assignment log — a transparency feed of every routing decision
+ * the AI made on its own. The admin monitors here; there is nothing to
+ * accept, override, or assign. That's the point.
+ */
+export default async function AiAutoAssignmentPage() {
   const supabase = await createClient();
   const { data } = await supabase
     .from("ai_analysis")
@@ -27,9 +31,8 @@ export default async function AiAnalysisPage() {
     reports: Report | null;
   })[]) ?? [];
 
-  // resolve the CURRENT assignment for every queued report so admins see
-  // exactly where each one is already routed (AI or human — indistinguishable
-  // by design: the truth of "who owns it" matters, not who wrote it)
+  // resolve the CURRENT assignment for every report so admins see exactly
+  // where each one is routed — always the AI's doing
   const reportIds = Array.from(
     new Set(rows.map((r) => r.report_id).filter((v): v is string => Boolean(v)))
   );
@@ -45,7 +48,7 @@ export default async function AiAnalysisPage() {
     : { data: [] as Record<string, unknown>[] | null };
   const assignedByReport = new Map<
     string,
-    { label: string; accepted: boolean; auto: boolean }
+    { label: string; accepted: boolean }
   >();
   for (const a of (assignRows as unknown as
     | {
@@ -66,32 +69,41 @@ export default async function AiAnalysisPage() {
           ? a.departments?.name ?? "a department"
           : a.barangays?.name ?? "a barangay",
       accepted: Boolean(a.accepted_at),
-      auto: a.assigned_by == null,
     });
   }
 
   const pending = rows.filter((r) => r.status !== "reviewed");
   const autoAssigned = rows.filter((r) => r.auto_assigned).length;
+  const needingAttention = rows.filter((r) => !r.auto_assigned).length;
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title="AI Analysis"
-        subtitle="Review, accept or override AI recommendations"
+        title="AI Auto-Assignment"
+        subtitle="Every report is classified and routed automatically — this log shows how"
       />
       <Card className="p-4 text-sm text-slate-600">
-        AI results are <strong>recommendations only</strong> — produced by a
-        100% free, fully local model (CLIP zero-shot, no external API).
-        Suggestions below{" "}
-        {Math.round(CONFIDENCE_THRESHOLD * 100)}% confidence are flagged{" "}
-        <span className="rounded bg-warn-100 px-1.5 py-0.5 text-xs font-semibold text-warn-700">low_confidence</span>{" "}
-        and are never auto-assigned. {autoAssigned > 0 && (
-          <>Currently <strong>{autoAssigned}</strong> recommendation{autoAssigned === 1 ? "" : "s"} auto-assigned pending your review.</>
+        Reports are <strong>assigned automatically the moment they are submitted</strong> — the
+        AI identifies the issue, picks the responsible department or barangay, and notifies the
+        unit instantly. Your job here is oversight, not routing: check the decisions, and use
+        <strong> Re-run AI check</strong> on a report if an analysis failed.{" "}
+        {Math.round(CONFIDENCE_THRESHOLD * 100)}%+ confidence is normally required for routing;
+        the pipeline falls back to the best available unit whenever the signal is weaker.{" "}
+        {autoAssigned > 0 && (
+          <>
+            <strong>{autoAssigned}</strong> report{autoAssigned === 1 ? "" : "s"} auto-assigned
+            so far.{" "}
+          </>
+        )}
+        {needingAttention > 0 && (
+          <span className="text-warn-700">
+            {needingAttention} could not be routed and may need a re-run.
+          </span>
         )}
       </Card>
 
       {pending.length === 0 ? (
-        <EmptyState icon="robot" title="No AI analyses pending review" hint="New analyses appear here as citizens submit photo reports." />
+        <EmptyState icon="robot" title="No AI decisions yet" hint="Every citizen submission produces an entry here automatically." />
       ) : (
         <div className="space-y-3">
           {pending.map((row) => {
@@ -100,7 +112,7 @@ export default async function AiAnalysisPage() {
               ? assignedByReport.get(row.report_id) ?? null
               : null;
             return (
-              <Card key={row.id} className={`p-4 ${low ? "border-warn-300" : ""}`}>
+              <Card key={row.id} className={`p-4 ${!assigned ? "border-warn-300" : ""}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -120,14 +132,13 @@ export default async function AiAnalysisPage() {
                           {row.handling_level === "municipal" ? "Municipal" : "Barangay"} level
                         </span>
                       )}
-                      {row.auto_assigned && (
-                        <span className="rounded-full bg-accent-100 px-2 py-0.5 text-xs font-semibold text-accent-800">
-                          auto-assigned
+                      {row.auto_assigned ? (
+                        <span className="rounded-full bg-success-50 px-2 py-0.5 text-xs font-semibold text-success-700">
+                          ✓ auto-assigned
                         </span>
-                      )}
-                      {row.status === "low_confidence" && (
+                      ) : (
                         <span className="rounded-full bg-warn-100 px-2 py-0.5 text-xs font-semibold text-warn-700">
-                          needs review
+                          not routed
                         </span>
                       )}
                     </div>
@@ -140,20 +151,31 @@ export default async function AiAnalysisPage() {
                     {row.reason && (
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{row.reason}</p>
                     )}
-                    {assigned && (
+                    {assigned ? (
                       <p className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-primary-50 px-2.5 py-1.5 text-xs font-semibold text-primary-700">
                         <Icon name="clipboard" size="sm" />
-                        Already assigned to {assigned.label}
+                        Assigned to {assigned.label}
                         {assigned.accepted
                           ? " — the unit has accepted and is working on it."
-                          : " — waiting for the unit to accept. No action needed unless you want to re-route."}
+                          : " — waiting for the unit to accept."}
+                      </p>
+                    ) : (
+                      <p className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-warn-50 px-2.5 py-1.5 text-xs font-semibold text-warn-700">
+                        <Icon name="alert" size="sm" />
+                        No responsible unit could be resolved — open the report and use
+                        &ldquo;Re-run AI check&rdquo;.
                       </p>
                     )}
                     <p className="mt-1 text-xs text-slate-500">
-                      Suggests: {row.reports?.categories?.name ?? "no category"} · {row.reports?.departments?.name ?? "no department"} · {row.reports?.barangays?.name ?? "no barangay"} · model {row.model_used}
+                      {row.reports?.categories?.name ?? "no category"} · {row.reports?.departments?.name ?? "no department"} · {row.reports?.barangays?.name ?? "no barangay"} · model {row.model_used}
                     </p>
                   </div>
-                  <AiRowActions reportId={row.report_id!} confidence={row.confidence ?? 0} />
+                  <Link
+                    href={`/dashboard/reports/${row.report_id}`}
+                    className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50"
+                  >
+                    View report
+                  </Link>
                 </div>
               </Card>
             );

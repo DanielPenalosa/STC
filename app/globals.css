@@ -292,6 +292,12 @@ input[type="checkbox"] {
   animation: bar-fill 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.6s both;
 }
 
+/* linear fill for the hero showcase auto-next timer (width set inline) */
+@keyframes bar-fill-x {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
 /* page-load fade for the whole landing main element */
 @keyframes landing-fade {
   from { opacity: 0; }
@@ -315,6 +321,10 @@ input[type="checkbox"] {
   }
   .reveal {
     opacity: 1 !important;
+  }
+  /* auto-advance showcase: freeze on one screen instead of cycling */
+  .hero-showcase-timer {
+    display: none;
   }
 }
 

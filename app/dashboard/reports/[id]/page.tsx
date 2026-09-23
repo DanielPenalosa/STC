@@ -609,27 +609,17 @@ export default async function ReportDetailPage({
             canNote={isStaff}
           />
 
-          {/* AI pre-check (admin) */}
+          {/* AI auto-assignment summary (admin) */}
           {ai && profile.role === "admin" && (
             <AiCard
               reportId={report.id}
-              categoryId={report.categories?.id ?? null}
-              departmentId={report.departments?.id ?? null}
-              barangayId={report.barangays?.id ?? null}
-              categories={categories}
-              departments={departments}
-              barangays={barangays}
               ai={{
                 detected_issue: ai.detected_issue,
-                suggested_category_id: ai.suggested_category_id,
-                suggested_department_id: ai.suggested_department_id,
-                suggested_barangay_id: ai.suggested_barangay_id,
                 confidence: ai.confidence,
                 urgency: ai.urgency,
                 reason: ai.reason,
                 handling_level: ai.handling_level,
                 auto_assigned: ai.auto_assigned ?? false,
-                admin_decision: ai.admin_decision,
                 status: ai.status,
               }}
             />

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setReportStatus, setPriority, assignReport, rejectReport } from "@/app/actions/admin";
+import { setReportStatus, setPriority, rejectReport } from "@/app/actions/admin";
 import { btn } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { PRIORITY_LABELS } from "@/lib/constants";
@@ -10,7 +10,6 @@ import type { ReportStatus, Priority } from "@/lib/constants";
 
 type Opt = { id: string; name: string };
 
-/** Small dropdown menu used for Assign and Priority in the header. */
 function Menu({
   label,
   icon,
@@ -67,11 +66,11 @@ function Menu({
  * Admin action bar, pinned to the top-right of the report header —
  * always findable without scrolling (like the reference design).
  *
- * Buttons appear only when meaningful:
+ * The AI already routed this report automatically — the admin never
+ * assigns units. Buttons appear only when meaningful:
  *  - Verify / Reject: while the report is submitted or under review
- *  - Assign: ONLY before an assignment exists — a routed report cannot
- *    be re-routed from here (keeps the accountability chain clean)
- *  - Priority: any time
+ *  - Priority: after verification (the AI's auto-assigned priority can be tuned)
+ *  - Already-routed reports show the waiting note instead of an Assign menu
  */
 export default function HeaderActions({
   reportId,
@@ -94,17 +93,13 @@ export default function HeaderActions({
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [assignType, setAssignType] = useState<"department" | "barangay">("department");
-  const [target, setTarget] = useState("");
   const [rejectReason, setRejectReason] = useState("");
 
-  const opts = assignType === "department" ? departments : barangays;
   /* strict lifecycle gating:
      - submitted/under_review → Verify + Reject ONLY
-     - verified (not yet routed) → Assign + Priority
-     - assignment exists → waiting note (no further admin routing)      */
+     - verified/assigned → Priority + waiting note (the AI does the routing) */
   const canTriage = status === "submitted" || status === "under_review";
-  const canAssign = !hasAssignment && (status === "verified" || status === "assigned");
+  const canAssign = status === "verified" || status === "assigned";
 
   async function run(key: string, fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusy(key);
@@ -123,55 +118,7 @@ export default function HeaderActions({
         </p>
       )}
 
-      {/* — Assign (only AFTER verification, before routing) — */}
-      {canAssign && (
-        <Menu label="Assign" icon="clipboard" tone="primary">
-          {(close) => (
-            <div className="space-y-2">
-              <div className="flex gap-1.5">
-                {(["department", "barangay"] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => {
-                      setAssignType(t);
-                      setTarget("");
-                    }}
-                    className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold capitalize transition ${
-                      assignType === t
-                        ? "bg-primary-50 text-primary-700 ring-1 ring-primary-200"
-                        : "bg-slate-50 text-slate-500 hover:text-slate-700"
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-              <select
-                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
-                value={target}
-                onChange={(e) => setTarget(e.target.value)}
-              >
-                <option value="">— Select {assignType} —</option>
-                {opts.map((o) => (
-                  <option key={o.id} value={o.id}>{o.name}</option>
-                ))}
-              </select>
-              <button
-                onClick={() => {
-                  close();
-                  void run("assign", () => assignReport(reportId, assignType, target));
-                }}
-                disabled={!target || busy !== null}
-                className={`${btn.primary} w-full justify-center`}
-              >
-                {busy === "assign" ? "Assigning…" : "Assign & notify"}
-              </button>
-            </div>
-          )}
-        </Menu>
-      )}
-
-      {/* — Priority (after verification; auto-boosted by followers, admin may override) — */}
+      {/* — Priority (after verification; auto-boosted by followers, admin may tune) — */}
       {canAssign && (
       <Menu label="Priority" icon="alert" tone="secondary">
         {(close) => (
@@ -200,8 +147,8 @@ export default function HeaderActions({
       </Menu>
       )}
 
-      {/* — assigned reminder note (shows INSTEAD of further actions) — */}
-      {hasAssignment && (status === "assigned" || status === "verified") && (
+      {/* — assigned reminder note (replaces the old manual-assign menu) — */}
+      {hasAssignment && status !== "in_progress" && (
         <span className="inline-flex items-center gap-1.5 rounded-lg bg-primary-50 px-3 py-2 text-xs font-medium text-primary-700">
           <Icon name="clock" size="sm" />
           Assigned to {assignedToName ?? "a unit"} — please wait for them to accept and work on it.

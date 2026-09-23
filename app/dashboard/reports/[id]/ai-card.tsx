@@ -1,63 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { acceptAiSuggestion, overrideAi } from "@/app/actions/admin";
-import { btn, inputCls } from "@/components/ui";
+import { rerunAiAnalysis } from "@/app/actions/admin";
+import { btn } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { CONFIDENCE_THRESHOLD } from "@/lib/constants";
 
-type Opt = { id: string; name: string };
-
 /**
- * Sidebar card for the AI recommendation — accept in one tap, or expand
- * to override category / department / barangay manually.
+ * Sidebar card for the AI's automatic classification + routing decision.
+ * READ-ONLY by design: the AI assigns the unit the moment the report is
+ * submitted, so there is nothing to "accept". The only admin action is
+ * re-running the analysis if it failed.
  */
 export default function AiCard({
   reportId,
-  categoryId,
-  departmentId,
-  barangayId,
-  categories,
-  departments,
-  barangays,
   ai,
 }: {
   reportId: string;
-  categoryId: string | null;
-  departmentId: string | null;
-  barangayId: string | null;
-  categories: Opt[];
-  departments: Opt[];
-  barangays: Opt[];
   ai: {
     detected_issue: string | null;
-    suggested_category_id: string | null;
-    suggested_department_id: string | null;
-    suggested_barangay_id: string | null;
     confidence: number | null;
     urgency: "low" | "medium" | "high" | "critical" | null;
     reason: string | null;
     handling_level: "barangay" | "municipal" | null;
     auto_assigned: boolean | null;
-    admin_decision: string | null;
     status: string;
   };
 }) {
   const router = useRouter();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [editCat, setEditCat] = useState(ai.suggested_category_id ?? categoryId ?? "");
-  const [editDept, setEditDept] = useState(ai.suggested_department_id ?? departmentId ?? "");
-  const [editBrgy, setEditBrgy] = useState(ai.suggested_barangay_id ?? barangayId ?? "");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
-  async function run(key: string, fn: () => Promise<{ ok: boolean; error?: string }>) {
-    setBusy(key);
-    setError(null);
-    const res = await fn();
-    setBusy(null);
-    if (!res.ok) setError(res.error ?? "Action failed");
-    else router.refresh();
+  async function rerun() {
+    setBusy(true);
+    setNote(null);
+    const res = await rerunAiAnalysis(reportId);
+    setBusy(false);
+    // the pipeline is async — tell the admin to check back in a moment
+    if (res.ok) setNote("Re-analysis started — refresh in a few seconds.");
+    else setNote(res.error ?? "Could not start the re-analysis.");
   }
 
   const low = (ai.confidence ?? 0) < CONFIDENCE_THRESHOLD;
@@ -67,7 +49,7 @@ export default function AiCard({
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
         <p className="flex items-center gap-2 text-sm font-bold text-slate-800">
           <Icon name="robot" size="md" className="text-primary-600" />
-          AI pre-check
+          AI Auto-Assignment
         </p>
         <span
           className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
@@ -79,12 +61,6 @@ export default function AiCard({
       </div>
 
       <div className="space-y-2.5 px-4 py-3 text-sm text-slate-600">
-        {error && (
-          <p className="flex items-center gap-1.5 rounded-lg bg-danger-50 px-2.5 py-1.5 text-xs text-danger-600">
-            <Icon name="alert" size="sm" /> {error}
-          </p>
-        )}
-
         <p>
           Detected: <strong>{ai.detected_issue ?? "—"}</strong>
         </p>
@@ -111,61 +87,32 @@ export default function AiCard({
                 {ai.handling_level === "municipal" ? "Municipal" : "Barangay"} level
               </span>
             )}
-            {ai.auto_assigned && (
-              <span className="rounded-full bg-accent-100 px-2 py-0.5 text-[11px] font-semibold text-accent-800">
-                auto-assigned
+            {ai.auto_assigned ? (
+              <span className="rounded-full bg-success-50 px-2 py-0.5 text-[11px] font-semibold text-success-700">
+                ✓ Auto-assigned
+              </span>
+            ) : (
+              <span className="rounded-full bg-warn-50 px-2 py-0.5 text-[11px] font-semibold text-warn-700">
+                Not assigned — needs re-run
               </span>
             )}
           </div>
         )}
         {ai.reason && <p className="text-xs leading-relaxed text-slate-500">{ai.reason}</p>}
 
-        <button
-          onClick={() => void run("ai-accept", () => acceptAiSuggestion(reportId))}
-          disabled={busy !== null}
-          className={`${btn.primary} w-full justify-center`}
-        >
-          {busy === "ai-accept" ? "Applying…" : "Accept suggestion"}
-        </button>
+        {note && (
+          <p className="rounded-lg bg-primary-50 px-2.5 py-1.5 text-xs text-primary-700">{note}</p>
+        )}
 
-        <details className="group">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-semibold text-slate-500 transition hover:text-slate-700">
-            <Icon name="edit" size="sm" />
-            Override classification manually
-          </summary>
-          <div className="mt-2.5 grid gap-2">
-            <select className={inputCls} value={editCat} onChange={(e) => setEditCat(e.target.value)}>
-              <option value="">Category…</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <select className={inputCls} value={editDept} onChange={(e) => setEditDept(e.target.value)}>
-              <option value="">Department…</option>
-              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-            <select className={inputCls} value={editBrgy} onChange={(e) => setEditBrgy(e.target.value)}>
-              <option value="">Barangay…</option>
-              {barangays.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-            <button
-              onClick={() =>
-                void run("ai-override", () =>
-                  overrideAi(reportId, {
-                    categoryId: editCat || null,
-                    departmentId: editDept || null,
-                    barangayId: editBrgy || null,
-                  })
-                )
-              }
-              disabled={busy !== null}
-              className={`${btn.secondary} w-full justify-center`}
-            >
-              Save classification
-            </button>
-          </div>
-        </details>
+        {!ai.auto_assigned && (
+          <button onClick={rerun} disabled={busy} className={`${btn.primary} w-full justify-center`}>
+            {busy ? "Re-analyzing…" : "Re-run AI check"}
+          </button>
+        )}
 
-        <p className="text-[11px] text-slate-400">
-          Recommendation only — the admin decides.{low && " Below confidence threshold: review manually."}
+        <p className="text-[11px] leading-relaxed text-slate-400">
+          This classification and its routing were decided automatically by the AI when the report
+          was submitted — no manual assignment needed. The responsible unit was notified instantly.
         </p>
       </div>
     </section>

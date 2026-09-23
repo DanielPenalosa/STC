@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Logo, CLIENT_NAME, CITY_NAME, TAGLINE } from "./brand";
 import { Icon, type IconName } from "@/components/icons";
 import { Reveal } from "@/components/reveal";
+import HeroShowcase from "./hero-showcase";
 
 const FEATURES: { icon: IconName; title: string; text: string }[] = [
   {
@@ -70,33 +71,33 @@ const FAQS: { q: string; a: string }[] = [
 export default function Landing() {
   return (
     <main className="landing-fade flex min-h-screen flex-col bg-surface">
-      {/* ================= header ================= */}
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
+      {/* ================= header — navy like the admin shell ================= */}
+      <header className="safe-top sticky top-0 z-40 border-b border-white/10 bg-navy bg-cover bg-center backdrop-blur-md" style={{ backgroundImage: "url('/blue-bg.jpg')" }}>
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-5">
           <Link href="/" className="flex items-center gap-3">
             <Logo size={34} />
             <div>
-              <p className="text-sm font-bold leading-tight text-slate-900">{CLIENT_NAME}</p>
-              <p className="text-xs text-slate-500">{CITY_NAME}</p>
+              <p className="text-sm font-bold leading-tight text-white">{CLIENT_NAME}</p>
+              <p className="text-xs text-primary-200">{CITY_NAME}</p>
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-7 text-sm font-medium text-slate-600 md:flex">
-            <a href="#how" className="transition hover:text-primary-600">How it works</a>
-            <a href="#features" className="transition hover:text-primary-600">Features</a>
-            <a href="#faq" className="transition hover:text-primary-600">FAQ</a>
+          <nav className="hidden items-center gap-7 text-sm font-medium text-primary-100 md:flex">
+            <a href="#how" className="transition hover:text-white">How it works</a>
+            <a href="#features" className="transition hover:text-white">Features</a>
+            <a href="#faq" className="transition hover:text-white">FAQ</a>
           </nav>
 
           <div className="flex items-center gap-2">
             <Link
               href="/login"
-              className="press hidden rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 sm:inline-flex"
+              className="press hidden rounded-lg px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-white/10 sm:inline-flex"
             >
               Sign in
             </Link>
             <Link
               href="/register"
-              className="press inline-flex items-center gap-1 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm shadow-primary-600/20 transition hover:bg-primary-700"
+              className="press inline-flex items-center gap-1 rounded-lg bg-white px-3.5 py-2 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-primary-50"
             >
               Get started
               <Icon name="chevron-right" size="sm" />
@@ -178,86 +179,9 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* ---------- visual: floating mock report card ---------- */}
+          {/* ---------- visual: auto-advancing feature showcase ---------- */}
           <div className="hero-rise relative mx-auto w-full max-w-md lg:max-w-none" style={{ animationDelay: "0.4s" }}>
-            <div className="float-slow relative">
-              {/* radar ping behind the pin */}
-              <span className="ping-ring absolute left-1/2 top-6 -ml-10 h-20 w-20 rounded-full border-2 border-primary-400/60" aria-hidden />
-              <span
-                className="ping-ring absolute left-1/2 top-6 -ml-10 h-20 w-20 rounded-full border-2 border-primary-300/50"
-                style={{ animationDelay: "1.3s" }}
-                aria-hidden
-              />
-
-              <div className="relative rounded-3xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/10 sm:p-6">
-                {/* card header */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="live-blink absolute inline-flex h-full w-full rounded-full bg-success-500" />
-                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-success-600" />
-                    </span>
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-success-700">
-                      Live
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-semibold text-slate-400">#0427</span>
-                </div>
-
-                {/* photo placeholder */}
-                <div className="mt-4 flex h-36 items-center justify-center rounded-2xl border border-dashed border-primary-200 bg-primary-50/60">
-                  <Icon name="camera" size="xl" className="text-primary-400" />
-                </div>
-
-                {/* body */}
-                <div className="mt-4 flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-bold text-slate-900">Broken streetlight</p>
-                    <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
-                      <Icon name="pin" size="sm" className="text-slate-400" />
-                      Brgy. Sampaguita, near the plaza
-                    </p>
-                  </div>
-                  <span className="shrink-0 rounded-full bg-warn-50 px-2.5 py-1 text-[11px] font-bold text-warn-600 ring-1 ring-warn-200">
-                    In progress
-                  </span>
-                </div>
-
-                {/* progress */}
-                <div className="mt-4">
-                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400">
-                    <span>Report progress</span>
-                    <span>3 of 4 steps</span>
-                  </div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                    <div className="bar-fill h-full rounded-full bg-gradient-to-r from-primary-500 to-accent-500" />
-                  </div>
-                </div>
-
-                {/* timeline */}
-                <div className="mt-5 space-y-2.5 border-t border-slate-100 pt-4">
-                  {[
-                    { label: "Report received", done: true },
-                    { label: "Verified by admin", done: true },
-                    { label: "Assigned to City Engineering", done: true },
-                    { label: "Marked resolved", done: false },
-                  ].map((row) => (
-                    <div key={row.label} className="flex items-center gap-2.5 text-xs">
-                      <span
-                        className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full ${
-                          row.done ? "bg-success-100 text-success-700" : "border border-dashed border-slate-300 text-slate-300"
-                        }`}
-                      >
-                        {row.done && <Icon name="check-circle" size="sm" strokeWidth={2.4} />}
-                      </span>
-                      <span className={row.done ? "text-slate-600" : "text-slate-400"}>
-                        {row.label}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <HeroShowcase />
           </div>
         </div>
       </section>
@@ -374,16 +298,16 @@ export default function Landing() {
         </section>
       </Reveal>
 
-      {/* ================= footer ================= */}
-      <footer className="mt-auto border-t border-slate-200/70 bg-white px-4 py-10 sm:px-5">
+      {/* ================= footer — navy like the header ================= */}
+      <footer className="mt-auto border-t border-white/10 bg-navy bg-cover bg-center px-4 py-10 text-white sm:px-5" style={{ backgroundImage: "url('/blue-bg.jpg')" }}>
         <div className="mx-auto max-w-6xl">
           <div className="flex flex-col items-start justify-between gap-8 sm:flex-row">
             <div className="max-w-xs">
               <div className="flex items-center gap-2.5">
                 <Logo size={30} />
-                <p className="text-sm font-bold text-slate-900">{CLIENT_NAME}</p>
+                <p className="text-sm font-bold text-white">{CLIENT_NAME}</p>
               </div>
-              <p className="mt-3 text-xs leading-relaxed text-slate-500">
+              <p className="mt-3 text-xs leading-relaxed text-primary-200">
                 {TAGLINE} — helping residents and staff of {CITY_NAME} keep the
                 community safe, clean and moving.
               </p>
@@ -391,25 +315,25 @@ export default function Landing() {
 
             <div className="flex gap-14">
               <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Product</p>
-                <div className="mt-3 flex flex-col gap-2 text-sm text-slate-600">
-                  <a href="#how" className="transition hover:text-primary-600">How it works</a>
-                  <a href="#features" className="transition hover:text-primary-600">Features</a>
-                  <a href="#faq" className="transition hover:text-primary-600">FAQ</a>
+                <p className="text-xs font-bold uppercase tracking-widest text-primary-300">Product</p>
+                <div className="mt-3 flex flex-col gap-2 text-sm text-primary-100">
+                  <a href="#how" className="transition hover:text-white">How it works</a>
+                  <a href="#features" className="transition hover:text-white">Features</a>
+                  <a href="#faq" className="transition hover:text-white">FAQ</a>
                 </div>
               </div>
               <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Access</p>
-                <div className="mt-3 flex flex-col gap-2 text-sm text-slate-600">
-                  <Link href="/register" className="transition hover:text-primary-600">Create account</Link>
-                  <Link href="/login" className="transition hover:text-primary-600">Staff sign in</Link>
-                  <Link href="/install" className="transition hover:text-primary-600">Install the app</Link>
+                <p className="text-xs font-bold uppercase tracking-widest text-primary-300">Access</p>
+                <div className="mt-3 flex flex-col gap-2 text-sm text-primary-100">
+                  <Link href="/register" className="transition hover:text-white">Create account</Link>
+                  <Link href="/login" className="transition hover:text-white">Staff sign in</Link>
+                  <Link href="/install" className="transition hover:text-white">Install the app</Link>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="mt-10 flex flex-col items-start justify-between gap-2 border-t border-slate-100 pt-5 text-xs text-slate-400 sm:flex-row sm:items-center">
+          <div className="mt-10 flex flex-col items-start justify-between gap-2 border-t border-white/10 pt-5 text-xs text-primary-300 sm:flex-row sm:items-center">
             <p>© {new Date().getFullYear()} {CLIENT_NAME} · {CITY_NAME}</p>
             <p>Report an issue · Track it · See it fixed</p>
           </div>

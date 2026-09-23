@@ -17,7 +17,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type DuplicateSignal = "photo" | "text" | "location" | "category";
+export type DuplicateSignal = "photo" | "text" | "location" | "category" | "ai_image";
 
 export type DuplicateEvidence = {
   signal: DuplicateSignal;
@@ -62,7 +62,7 @@ const MAX_CANDIDATES = 40;
 
 /* ----------------------------- signals ----------------------------- */
 
-function photoSignal(newHashes: string[], oldHashes: string[]): DuplicateEvidence | null {
+export function photoSignal(newHashes: string[], oldHashes: string[]): DuplicateEvidence | null {
   if (!newHashes.length || !oldHashes.length) return null;
   const old = new Set(oldHashes);
   const shared = newHashes.filter((h) => old.has(h)).length;
@@ -96,7 +96,7 @@ function stem(w: string): string {
     .replace(/(.)\1$/, "$1");
 }
 
-function textSignal(newReport: NewReportFacts, old: { title: string; description: string }): DuplicateEvidence | null {
+export function textSignal(newReport: NewReportFacts, old: { title: string; description: string }): DuplicateEvidence | null {
   const a = tokens(`${newReport.title} ${newReport.description}`);
   const b = new Set(tokens(`${old.title} ${old.description}`));
   if (!a.length || !b.size) return null;
@@ -110,7 +110,7 @@ function textSignal(newReport: NewReportFacts, old: { title: string; description
   };
 }
 
-function locationSignal(
+export function locationSignal(
   newReport: NewReportFacts,
   old: { latitude: number | null; longitude: number | null }
 ): DuplicateEvidence | null {
@@ -140,7 +140,7 @@ function categorySignal(
   return { signal: "category", score: 1, details: {} };
 }
 
-function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
@@ -151,13 +151,17 @@ function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number)
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-/** Weighted combination — photo identity dominates, text second. */
+/** Weighted combination — photo identity dominates, text second.
+ *  `ai_image` (browser CLIP embedding similarity) scores like text: strong
+ *  corroborating evidence, not proof on its own — two different potholes can
+ *  look alike. */
 export function combineScore(evidence: DuplicateEvidence[]): number {
   let score = 0;
   for (const e of evidence) {
     switch (e.signal) {
       case "photo": score = Math.max(score, 0.9 * e.score + 0.1); break;
       case "text": score += 0.45 * e.score; break;
+      case "ai_image": score += 0.45 * e.score; break;
       case "location": score += 0.2 * e.score; break;
       case "category": score += 0.1 * e.score; break;
     }
@@ -167,11 +171,6 @@ export function combineScore(evidence: DuplicateEvidence[]): number {
 
 /* ----------------------------- engine ----------------------------- */
 
-/**
- * Compare a new report against recent reports in the same barangay and
- * persist evidence + flag when the combined score clears the threshold.
- * Never throws; failures are silent (detection is advisory).
- */
 export async function detectDuplicates(
   client: SupabaseClient,
   reportId: string,

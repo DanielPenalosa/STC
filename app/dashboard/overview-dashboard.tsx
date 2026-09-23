@@ -170,7 +170,7 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
         ]
       : [
           { icon: "file", title: "View All Reports", desc: "Check and manage submitted reports", href: "/dashboard/reports" },
-          { icon: "robot", title: "Review AI Recommendations", desc: "Accept or override AI classification", href: "/dashboard/ai" },
+          { icon: "robot", title: "AI Auto-Assignment Log", desc: "Every report routed automatically — view the AI's decisions", href: "/dashboard/ai-assignments" },
           { icon: "users", title: "Manage Users", desc: "Approvals, roles and account status", href: "/dashboard/users" },
           { icon: "settings", title: "System Settings", desc: "Configure system preferences", href: "/dashboard/settings" },
         ];

@@ -171,71 +171,18 @@ export async function deleteReport(reportId: string): Promise<ActionResult> {
   return { ok: true };
 }
 
-export async function assignReport(
-  reportId: string,
-  assignedType: "department" | "barangay",
-  targetId: string,
-  note?: string
-): Promise<ActionResult> {
-  const admin = await requireAdmin();
-  const supabase = await createClient();
-
-  const { error: aError } = await supabase.from("assignments").insert({
-    report_id: reportId,
-    assigned_type: assignedType,
-    department_id: assignedType === "department" ? targetId : null,
-    barangay_id: assignedType === "barangay" ? targetId : null,
-    assigned_by: admin.id,
-    note: note ?? null,
-  });
-  if (aError) return { ok: false, error: aError.message };
-
-  const patch: Record<string, string> = { status: "assigned" };
-  if (assignedType === "department") patch.department_id = targetId;
-  else patch.barangay_id = targetId;
-
-  const { error: rError } = await supabase
-    .from("reports")
-    .update(patch)
-    .eq("id", reportId);
-  if (rError) return { ok: false, error: rError.message };
-
-  // notify the assignee side (department/barangay staff accounts)
-  const col = assignedType === "department" ? "department_id" : "barangay_id";
-  const { data: staff } = await supabase
-    .from("users")
-    .select("id")
-    .eq("role", assignedType)
-    .eq(col, targetId);
-  if (staff?.length) {
-    const { data: rep } = await supabase
-      .from("reports")
-      .select("ref_code, title")
-      .eq("id", reportId)
-      .maybeSingle();
-    await supabase.from("notifications").insert(
-      (staff as { id: string }[]).map((s) => ({
-        user_id: s.id,
-        report_id: reportId,
-        title: `New report assigned — ${rep?.ref_code ?? ""}`,
-        body: `You have a new assigned report: ${rep?.title ?? ""}`,
-        type: "assignment",
-      }))
-    );
-  }
-
-  revalidatePath("/dashboard/reports");
+/**
+ * Re-run the AI pipeline for a report — the admin's fix-it tool when the
+ * initial analysis failed. Never throws (fire-and-forget); the AI page and
+ * the report detail reflect the result once it lands.
+ */
+export async function rerunAiAnalysis(reportId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const { runAiAnalysis } = await import("@/lib/ai");
+  await runAiAnalysis(reportId);
+  revalidatePath("/dashboard/ai-assignments");
   revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
-}
-
-export async function reassignReport(
-  reportId: string,
-  assignedType: "department" | "barangay",
-  targetId: string,
-  note?: string
-): Promise<ActionResult> {
-  return assignReport(reportId, assignedType, targetId, note ?? "Reassigned");
 }
 
 /* ------------------------------ AI ------------------------------ */
@@ -296,119 +243,6 @@ export async function markAsDuplicate(
   revalidatePath("/dashboard/reports");
   revalidatePath(`/dashboard/reports/${reportId}`);
   revalidatePath(`/dashboard/reports/${originalId}`);
-  return { ok: true };
-}
-
-export async function overrideAi(
-  reportId: string,
-  patch: {
-    categoryId?: string | null;
-    departmentId?: string | null;
-    barangayId?: string | null;
-  }
-): Promise<ActionResult> {
-  const admin = await requireAdmin();
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("reports")
-    .update({
-      ...(patch.categoryId !== undefined ? { category_id: patch.categoryId } : {}),
-      ...(patch.departmentId !== undefined ? { department_id: patch.departmentId } : {}),
-      ...(patch.barangayId !== undefined ? { barangay_id: patch.barangayId } : {}),
-    })
-    .eq("id", reportId);
-  if (error) return { ok: false, error: error.message };
-
-  // record the admin's decision on the AI recommendation
-  await supabase
-    .from("ai_analysis")
-    .update({
-      status: "reviewed",
-      admin_decision: "overridden",
-      decided_by: admin.id,
-      decided_at: new Date().toISOString(),
-    })
-    .eq("report_id", reportId)
-    .in("status", ["completed", "low_confidence", "pending"]);
-
-  revalidatePath("/dashboard/ai");
-  revalidatePath(`/dashboard/reports/${reportId}`);
-  return { ok: true };
-}
-
-export async function acceptAiSuggestion(reportId: string): Promise<ActionResult> {
-  const admin = await requireAdmin();
-  const supabase = await createClient();
-
-  const { data: ai } = await supabase
-    .from("ai_analysis")
-    .select("*")
-    .eq("report_id", reportId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!ai) return { ok: false, error: "No AI analysis found for this report" };
-  const a = ai as Record<string, string | null>;
-
-  const patch: Record<string, string | null> = {};
-  if (a.suggested_category_id) patch.category_id = a.suggested_category_id;
-  if (a.suggested_department_id) patch.department_id = a.suggested_department_id;
-  if (a.suggested_barangay_id) patch.barangay_id = a.suggested_barangay_id;
-
-  // fallback: if the AI row predates the mapping flow, fill the department
-  // from the category's configurable default when the report has none
-  if (!patch.department_id && patch.category_id) {
-    const { data: cat } = await supabase
-      .from("categories")
-      .select("default_department_id")
-      .eq("id", patch.category_id)
-      .maybeSingle();
-    const { data: report } = await supabase
-      .from("reports")
-      .select("department_id")
-      .eq("id", reportId)
-      .maybeSingle();
-    if (cat?.default_department_id && !report?.department_id) {
-      patch.department_id = cat.default_department_id;
-    }
-  }
-
-  const { error } = await supabase
-    .from("reports")
-    .update(patch)
-    .eq("id", reportId);
-  if (error) return { ok: false, error: error.message };
-
-  // record the admin's decision on the AI recommendation
-  await supabase
-    .from("ai_analysis")
-    .update({
-      status: "reviewed",
-      admin_decision: "accepted",
-      decided_by: admin.id,
-      decided_at: new Date().toISOString(),
-    })
-    .eq("report_id", reportId);
-
-  revalidatePath("/dashboard/ai");
-  revalidatePath(`/dashboard/reports/${reportId}`);
-  return { ok: true };
-}
-
-export async function markAiReviewed(reportId: string): Promise<ActionResult> {
-  const admin = await requireAdmin();
-  const supabase = await createClient();
-  await supabase
-    .from("ai_analysis")
-    .update({
-      status: "reviewed",
-      admin_decision: "manual",
-      decided_by: admin.id,
-      decided_at: new Date().toISOString(),
-    })
-    .eq("report_id", reportId);
-  revalidatePath("/dashboard/ai");
   return { ok: true };
 }
 

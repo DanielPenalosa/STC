@@ -5,16 +5,19 @@
  *   1. loads the report's first photo from storage
  *   2. runs the local pipeline (CLIP + urgency + routing)
  *   3. writes the full recommendation into ai_analysis
- *   4. AUTO-ASSIGNS:
- *        barangay level → the report's detected barangay account
- *        municipal      → the matching department (category default,
- *                         refined by keyword hints)
- *      …creating an `assignments` row exactly like admin assignReport does,
- *      marking status "assigned" and notifying the assignee staff.
- *   5. low confidence / no issue → NO auto-assign, admins notified to review
+ *   4. AUTO-ASSIGNS EVERY REPORT — admins never pick the unit manually:
+ *        1. barangay routing + GPS-detected barangay
+ *        2. municipal routing + matched department
+ *        3. fallback: any matched department (category default / keywords)
+ *        4. fallback: the detected barangay
+ *      …creating an `assignments` row (idempotent — never duplicated),
+ *      stamping reports.department_id/barangay_id, marking status
+ *      "assigned", and notifying the assignee staff + ALL admins.
+ *   5. only when the AI has NO usable signal at all (dead analysis, no
+ *      category, no GPS) → escalated to admins for review instead.
  *
- * Everything here is advisory: admins can reassign or override, and the
- * final decision is recorded on the ai_analysis row.
+ * The admin's job is oversight, not routing: they see the classification
+ * and the assignee, and can re-run the analysis if it failed.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
 import { analyzePhotoLocally, type LocalAiResult } from "./pipeline";
@@ -53,6 +56,51 @@ async function loadPhotoBytes(
     const res = await fetch(data.signedUrl);
     if (!res.ok) return null;
     return { bytes: new Uint8Array(await res.arrayBuffer()), mime: "image/jpeg" };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rebuild a ClientAiVerdict from the report's most recent stored analysis
+ * when it came from the browser — lets an admin "Re-run AI check" recover a
+ * failed pipeline run even on serverless hosts (no server CLIP needed).
+ */
+async function loadStoredBrowserVerdict(
+  admin: ReturnType<typeof createAdminClient>,
+  reportId: string
+): Promise<ClientAiVerdict | null> {
+  try {
+    const { data } = await admin
+      .from("ai_analysis")
+      .select("model_used, confidence, detected_issue, raw_response")
+      .eq("report_id", reportId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const row = data as
+      | {
+          model_used: string | null;
+          confidence: number | null;
+          detected_issue: string | null;
+          raw_response: {
+            issue_key?: string | null;
+            secondary_issues?: { key: string; title: string; score: number }[] | null;
+            quality?: { ok: boolean; reason?: string | null } | null;
+          } | null;
+        }
+      | null;
+    if (!row?.model_used?.startsWith("browser:")) return null;
+    const raw = row.raw_response ?? {};
+    return {
+      issueKey: raw.issue_key ?? null,
+      issueTitle: row.detected_issue ?? null,
+      confidence: Math.max(0, Math.min(1, Number(row.confidence) || 0)),
+      quality: raw.quality ?? { ok: true },
+      unrelated: false,
+      secondary: Array.isArray(raw.secondary_issues) ? raw.secondary_issues.slice(0, 3) : [],
+      model_used: row.model_used.slice("browser:".length) || "clip-vit-base-patch32 (Transformers.js)",
+    };
   } catch {
     return null;
   }
@@ -105,15 +153,17 @@ export async function runLocalAnalysisForReport(
     const { data: report } = await admin
       .from("reports")
       .select(
-        `id, title, description, latitude, longitude, address_text,
+        `id, ref_code, title, description, latitude, longitude, address_text,
          category_id, barangay_id, status,
-         categories(id, slug, name, default_department_id, handling_level)`
+         categories(id, slug, name, default_department_id, handling_level),
+         barangays(id, name)`
       )
       .eq("id", reportId)
       .maybeSingle();
     const rep = report as
       | {
           id: string;
+          ref_code: string | null;
           title: string;
           description: string;
           barangay_id: string | null;
@@ -125,6 +175,7 @@ export async function runLocalAnalysisForReport(
             default_department_id: string | null;
             handling_level: "barangay" | "municipal" | null;
           } | null;
+          barangays: { id: string; name: string } | null;
         }
       | null;
     if (!rep) return empty;
@@ -141,8 +192,13 @@ export async function runLocalAnalysisForReport(
     // 2. run the analysis — client verdict first (no server model needed),
     // server CLIP as fallback, text-only routing when there's no photo
     let result: LocalAiResult;
-    if (clientVerdict) {
-      result = decideFromClientVerdict(clientVerdict, {
+    // a previous BROWSER analysis stored on this report (re-run recovery):
+    // rebuild the client verdict from it so re-analysis works even on
+    // serverless hosts where server CLIP cannot run
+    const previous = clientVerdict ? null : await loadStoredBrowserVerdict(admin, reportId);
+    const effectiveVerdict = clientVerdict ?? previous;
+    if (effectiveVerdict) {
+      result = decideFromClientVerdict(effectiveVerdict, {
         title: rep.title,
         description: rep.description,
         categoryHandling: rep.categories?.handling_level ?? null,
@@ -206,9 +262,13 @@ export async function runLocalAnalysisForReport(
       }
     }
 
-    const department = result.routing?.level === "municipal"
-      ? pickDepartment(departments, rep.categories?.default_department_id ?? null, departmentHint)
-      : null;
+    // resolved regardless of level — municipal needs it as the primary
+    // target, barangay routing falls back to it when no barangay was detected
+    const department = pickDepartment(
+      departments,
+      rep.categories?.default_department_id ?? null,
+      departmentHint
+    );
 
     // prefer the AI-matched category (by slug) when the report has none —
     // the citizen form auto-fills it, but only when the match succeeded
@@ -255,37 +315,58 @@ export async function runLocalAnalysisForReport(
     }
     const analysisId = inserted.id as string;
 
-    // 5. auto-assign — ONLY when the AI is confident enough
+    // 5. AUTO-ASSIGN — every report is routed by the AI the moment it is
+    //    submitted; admins never choose the unit. Resolution order:
+    //      1. barangay-level routing + GPS-detected barangay
+    //      2. municipal-level routing + matched department
+    //      3. fallback: any matched department (category default / keywords)
+    //      4. fallback: the GPS-detected barangay
+    //    Only a dead analysis (no verdict at all) escalates to admins.
     let assigned: ServiceResult["assigned_to"] = null;
-    if (
-      !result.needs_review &&
-      result.ok &&
-      result.routing?.level &&
-      (result.routing.level === "barangay" ? rep.barangay_id : department)
-    ) {
-      const isBarangay = result.routing.level === "barangay";
-      const targetId = isBarangay ? rep.barangay_id! : department!.id;
-      const targetName = isBarangay ? "the detected barangay" : department!.name;
-      const note = `AI auto-assignment — ${result.issue?.title ?? "issue"} (${result.routing.level} level, ${Math.round(result.confidence * 100)}% confidence). ${result.urgency?.reason ?? ""}`;
+    const brgyName = rep.barangays?.name ?? "the detected barangay";
+    let assignLevel: "barangay" | "municipal" = result.routing?.level ?? "barangay";
+
+    let target: { type: "department" | "barangay"; id: string; name: string } | null = null;
+    if (assignLevel === "barangay" && rep.barangay_id) {
+      target = { type: "barangay", id: rep.barangay_id, name: brgyName };
+    } else if (department) {
+      if (assignLevel === "barangay") assignLevel = "municipal"; // routed up: no barangay detected
+      target = { type: "department", id: department.id, name: department.name };
+    } else if (rep.barangay_id) {
+      target = { type: "barangay", id: rep.barangay_id, name: brgyName };
+    }
+
+    // idempotency: a report can only ever have one AI assignment — re-runs
+    // (admin "Re-run AI check") refresh the classification, never re-route
+    const { count: existingAssignments } = await admin
+      .from("assignments")
+      .select("id", { count: "exact", head: true })
+      .eq("report_id", reportId);
+
+    if (target && !result.analysis_failed && !existingAssignments) {
+      const isBarangay = target.type === "barangay";
+      const issueTitle = result.issue?.title ?? "community issue";
+      const confPct = Math.round(result.confidence * 100);
+      const note = `AI auto-assignment — ${issueTitle} (${assignLevel} level, ${confPct}% confidence). ${result.urgency?.reason ?? ""}`.trim();
 
       const { error: assignError } = await admin.from("assignments").insert({
         report_id: reportId,
         assigned_type: isBarangay ? "barangay" : "department",
-        department_id: isBarangay ? null : targetId,
-        barangay_id: isBarangay ? targetId : null,
+        department_id: isBarangay ? null : target.id,
+        barangay_id: isBarangay ? target.id : null,
         assigned_by: null, // assigned by the AI pipeline (service role)
         note,
       });
 
       if (!assignError) {
-        assigned = { type: isBarangay ? "barangay" : "department", id: targetId, name: targetName };
-        // stamp the routing on the report itself (same as a manual admin
-        // assignment does) — every list/detail view reads these columns to
-        // display "Assigned to X", and the status bump uses the same
-        // guard as the manual flow: never override an earlier human decision
+        assigned = target;
+        // stamp the routing on the report itself — every list/detail view
+        // reads these columns to display "Assigned to X" — and bump the
+        // status with the same guard as before: never override an earlier
+        // human decision
         const routedPatch: Record<string, string> = {};
-        if (isBarangay) routedPatch.barangay_id = targetId;
-        else routedPatch.department_id = targetId;
+        if (isBarangay) routedPatch.barangay_id = target.id;
+        else routedPatch.department_id = target.id;
         routedPatch.status = "assigned";
         await admin
           .from("reports")
@@ -305,15 +386,32 @@ export async function runLocalAnalysisForReport(
           .from("users")
           .select("id")
           .eq("role", isBarangay ? "barangay" : "department")
-          .eq(col, targetId);
+          .eq(col, target.id);
         if (staff?.length) {
           await admin.from("notifications").insert(
             (staff as { id: string }[]).map((s) => ({
               user_id: s.id,
               report_id: reportId,
-              title: `New report assigned — ${rep.title.slice(0, 60)}`,
-              body: `AI routed this ${result.routing!.level}-level report to you: ${result.issue?.title ?? "issue"}. ${result.urgency ? `Urgency: ${result.urgency.level}.` : ""}`,
+              title: `New report assigned — ${rep.ref_code ?? rep.title.slice(0, 40)}`,
+              body: `AI routed this ${assignLevel}-level report to you: ${issueTitle}. ${result.urgency ? `Urgency: ${result.urgency.level}.` : ""}`,
               type: "assignment",
+            }))
+          );
+        }
+
+        // notify ALL admins: the report was submitted and auto-assigned —
+        // this is the admins' only required touchpoint (oversight, not routing)
+        const { data: admins } = await admin.from("users").select("id").eq("role", "admin");
+        if (admins?.length) {
+          const brgyPart = rep.barangays?.name ? ` in Brgy. ${rep.barangays.name}` : "";
+          const flagged = result.needs_review ? " — flagged for admin verification" : "";
+          await admin.from("notifications").insert(
+            (admins as { id: string }[]).map((a) => ({
+              user_id: a.id,
+              report_id: reportId,
+              title: `Report auto-assigned — ${rep.ref_code ?? ""}`.trim(),
+              body: `"${rep.title.slice(0, 80)}"${brgyPart} → ${target.name} (${confPct}% AI confidence${flagged}).`,
+              type: "auto_assigned",
             }))
           );
         }
@@ -322,16 +420,23 @@ export async function runLocalAnalysisForReport(
       }
     }
 
-    // 6. low confidence → notify admins for manual review (never auto-assign)
-    if (result.needs_review) {
+    // 6. no usable AI signal → escalate to admins (the ONLY case a human
+    //    ever looks at routing, and even then re-running the analysis is
+    //    the intended fix, not manual assignment)
+    if (!assigned) {
+      const reason =
+        result.needs_review_reason ??
+        (result.analysis_failed
+          ? "The AI check could not run for this report."
+          : "The AI could not identify the issue type or a responsible unit.");
       const { data: admins } = await admin.from("users").select("id").eq("role", "admin");
       if (admins?.length) {
         await admin.from("notifications").insert(
           (admins as { id: string }[]).map((a) => ({
             user_id: a.id,
             report_id: reportId,
-            title: `AI review needed — ${rep.title.slice(0, 60)}`,
-            body: result.needs_review_reason ?? "AI could not classify this report confidently.",
+            title: `AI review needed — ${rep.ref_code ?? rep.title.slice(0, 40)}`,
+            body: `${reason} The report was NOT auto-assigned — try "Re-run AI check" on the report.`,
             type: "ai_review",
           }))
         );

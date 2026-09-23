@@ -5,13 +5,170 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireProfile } from "@/lib/data";
 import { runAiAnalysis } from "@/lib/ai";
-import { detectDuplicates } from "@/lib/ai/duplicate";
 import { resolveBarangay } from "@/lib/detect-server";
+import { publicPhotoUrl } from "@/lib/photo";
+import {
+  detectDuplicates,
+  photoSignal,
+  textSignal,
+  locationSignal,
+  combineScore,
+  haversineMeters,
+  type DuplicateEvidence,
+  type NewReportFacts,
+} from "@/lib/ai/duplicate";
 import { cleanupReportPhotos, cleanupReportPhoto } from "@/lib/storage/cleanup";
 import type { Report, ReportPhoto } from "@/lib/types";
 import type { ReportStatus } from "@/lib/constants";
 
 export type ActionResult = { ok: boolean; error?: string; reportId?: string };
+
+/* ------------------------------------------------------------------ */
+/* Citizen: pre-submission duplicate check                             */
+/* ------------------------------------------------------------------ */
+
+export type SimilarReportInfo = {
+  reportId: string;
+  refCode: string | null;
+  title: string;
+  /** current lifecycle status key (e.g. "in_progress") */
+  status: string;
+  /** distance in meters from the new report's GPS (null when unknown) */
+  distanceM: number | null;
+  /** 0–1 overall similarity from the server-side signals */
+  score: number;
+  /** which signals matched — shown as chips in the popup */
+  signals: DuplicateEvidence[];
+  /** first photo (proxy URL) so the citizen can eyeball the original */
+  photoUrl: string | null;
+  createdAt: string;
+};
+
+/**
+ * Pre-submission duplicate check — runs when the citizen taps Submit and
+ * BEFORE anything is created. Scores the new report's facts against recent
+ * active reports near the same location (photo hash, text overlap, GPS
+ * proximity, category); the client layers ML image similarity on top.
+ * Advisory only: never throws, returns an empty list on any failure.
+ */
+export async function findSimilarReports(
+  facts: {
+    title: string;
+    description: string;
+    categoryId: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    photoHashes: string[];
+  }
+): Promise<{ ok: boolean; similar: SimilarReportInfo[]; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const since = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
+
+    // same scan scope as the post-submission engine: recent ACTIVE reports,
+    // narrowed to the report's barangay when one has been resolved
+    let query = supabase
+      .from("reports")
+      .select(
+        `id, ref_code, title, description, category_id, latitude, longitude,
+         barangay_id, status, created_at,
+         report_photos(id, storage_path, content_hash)`
+      )
+      .in("status", ["submitted", "under_review", "verified", "assigned", "in_progress"])
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(40);
+
+    if (facts.latitude != null && facts.longitude != null) {
+      // resolve the barangay the same way submission does, so the scan
+      // matches the scope the new report will land in
+      const r = await resolveBarangay(supabase, facts.latitude, facts.longitude);
+      if (r.barangayId) query = query.eq("barangay_id", r.barangayId);
+    }
+
+    const { data: rows, error } = await query;
+    if (error) return { ok: false, similar: [], error: error.message };
+    const candidates = (rows as unknown as Array<{
+      id: string;
+      ref_code: string | null;
+      title: string;
+      description: string;
+      category_id: string | null;
+      latitude: number | null;
+      longitude: number | null;
+      barangay_id: string | null;
+      status: string;
+      created_at: string;
+      report_photos: { id: string; storage_path: string; content_hash: string | null }[] | null;
+    }>) ?? [];
+
+    const newFacts: NewReportFacts = {
+      title: facts.title,
+      description: facts.description,
+      categoryId: facts.categoryId,
+      latitude: facts.latitude,
+      longitude: facts.longitude,
+      barangayId: null, // unknown client-side; the query already scoped it
+      photoHashes: facts.photoHashes,
+    };
+
+    const results: (SimilarReportInfo & { _candidatePhotoPath: string | null })[] = [];
+    for (const c of candidates) {
+      const oldHashes = (c.report_photos ?? [])
+        .map((p) => p.content_hash)
+        .filter((h): h is string => Boolean(h));
+      const evidence: DuplicateEvidence[] = [];
+      for (const ev of [
+        photoSignal(newFacts.photoHashes, oldHashes),
+        textSignal(newFacts, c),
+        locationSignal(newFacts, c),
+        {
+          signal: "category" as const,
+          score: newFacts.categoryId && c.category_id === newFacts.categoryId ? 1 : 0,
+          details: {},
+        },
+      ]) {
+        if (ev && ev.score > 0) evidence.push(ev);
+      }
+      const score = combineScore(evidence);
+      // pre-submission bar: same threshold the post-submission engine uses,
+      // but WITHOUT any ai_image evidence yet (that refines it client-side)
+      if (score < 0.3) continue;
+      const firstPhoto = (c.report_photos ?? []).find(
+        (p) => p.storage_path
+      );
+      results.push({
+        reportId: c.id,
+        refCode: c.ref_code,
+        title: c.title,
+        status: c.status,
+        distanceM:
+          newFacts.latitude != null &&
+          newFacts.longitude != null &&
+          c.latitude != null &&
+          c.longitude != null
+            ? Math.round(
+                haversineMeters(newFacts.latitude, newFacts.longitude, c.latitude, c.longitude)
+              )
+            : null,
+        score,
+        signals: evidence,
+        photoUrl: firstPhoto ? publicPhotoUrl(firstPhoto.storage_path, 320) : null,
+        createdAt: c.created_at,
+        _candidatePhotoPath: firstPhoto?.storage_path ?? null,
+      });
+    }
+    results.sort((a, b) => b.score - a.score);
+
+    return { ok: true, similar: results.slice(0, 5) };
+  } catch (e) {
+    return {
+      ok: false,
+      similar: [],
+      error: e instanceof Error ? e.message : "Duplicate check failed",
+    };
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Citizen: create report                                              */
@@ -40,6 +197,18 @@ export type NewReportInput = {
     unrelated: boolean;
     secondary?: { key: string; title: string; score: number }[];
     model_used: string;
+  } | null;
+  /**
+   * The duplicate warning the citizen SAW before submitting, with their
+   * explicit choice. Stored on the report so admins can see "the citizen
+   * was warned this looked like RPT-… and chose to file anyway".
+   */
+  duplicateHint?: {
+    similarReportId: string;
+    /** server-computed similarity at warn time (0–1) */
+    score: number;
+    /** ML image similarity if computed in the browser (0–1, null = skipped) */
+    imageSimilarity?: number | null;
   } | null;
 };
 
@@ -165,6 +334,32 @@ export async function createReport(
         }
       : null;
   void runAiAnalysis(reportId, clientVerdict);
+
+  // the citizen was warned about an existing report and chose to file —
+  // record it so admins see the deliberate duplicate instead of an accident
+  const hint = input.duplicateHint;
+  if (
+    hint &&
+    typeof hint.similarReportId === "string" &&
+    hint.similarReportId.length === 36
+  ) {
+    await createAdminClient().from("report_duplicates").upsert(
+      {
+        report_id: reportId,
+        similar_report_id: hint.similarReportId,
+        signal: "ai_image",
+        score: Math.max(0, Math.min(1, Number(hint.score) || 0)),
+        details: {
+          citizen_confirmed: true,
+          image_similarity:
+            hint.imageSimilarity == null
+              ? null
+              : Math.max(0, Math.min(1, Number(hint.imageSimilarity) || 0)),
+        },
+      },
+      { onConflict: "report_id,similar_report_id,signal" }
+    );
+  }
 
   // fire-and-forget duplicate detection — flags the report + notifies admins
   // when it looks like a copy; never blocks the submission

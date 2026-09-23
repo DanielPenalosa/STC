@@ -42,7 +42,7 @@ const NAV: Record<Role, NavGroup[]> = {
       group: "Operations",
       items: [
         { href: "/dashboard/reports", label: "Reports", icon: "file" },
-        { href: "/dashboard/ai", label: "AI Analysis", icon: "robot" },
+        { href: "/dashboard/ai-assignments", label: "AI Auto-Assignment", icon: "robot" },
       ],
     },
     {

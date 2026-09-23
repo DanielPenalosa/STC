@@ -8,7 +8,17 @@ import {
   classifyPhotoInBrowser,
   preloadBrowserModel,
 } from "@/lib/ai/local/browser-clip";
-import { createReport } from "@/app/actions/reports";
+import {
+  preloadEmbedder,
+  embedImage,
+  cosineSimilarity,
+} from "@/lib/ai/local/browser-embed";
+import {
+  createReport,
+  findSimilarReports,
+  type SimilarReportInfo,
+} from "@/app/actions/reports";
+import DuplicatePopup, { type DupCandidate } from "./duplicate-popup";
 import { btn, inputCls, Card } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { CONFIDENCE_THRESHOLD } from "@/lib/constants";
@@ -235,11 +245,19 @@ export default function SubmitReportClient({
   // so the admin side shows the same verdict instead of re-running server
   // CLIP (impossible on serverless hosts → "0% Unrecognized")
   const lastVerdictRef = useRef<import("@/lib/ai/local/decision").ClientAiVerdict | null>(null);
+  // duplicate-warning popup state
+  const [dupCandidate, setDupCandidate] = useState<DupCandidate | null>(null);
+  const dupCandidateRef = useRef<DupCandidate | null>(null);
+  dupCandidateRef.current = dupCandidate;
+  /** set once the citizen has confirmed past the popup — the check never
+   *  re-fires within this submission session */
+  const duplicateGate = useRef(false);
 
-  // start downloading the browser AI model on mount — it overlaps with the
-  // citizen picking a photo instead of delaying the first analysis
+  // start downloading the browser AI models on mount — they overlap with
+  // the citizen picking a photo instead of delaying the first analysis
   useEffect(() => {
     preloadBrowserModel();
+    preloadEmbedder(); // used by the duplicate check (image similarity)
   }, []);
 
   /**
@@ -254,6 +272,9 @@ export default function SubmitReportClient({
     setPreviews(arr.map((f) => URL.createObjectURL(f)));
     setUploadedPaths(arr.map(() => null));
     analyzeRetry.current = 0;
+    // a new photo invalidates both the duplicate verdict and the session gate
+    setDupCandidate(null);
+    duplicateGate.current = false;
 
     // upload each photo NOW (not on submit) so it can be cancelled
     // individually before the report goes in
@@ -498,6 +519,8 @@ export default function SubmitReportClient({
       analyzeToken.current++;
       analyzeRetry.current = 0;
       lastVerdictRef.current = null; // never forward a stale verdict
+      setDupCandidate(null);
+      duplicateGate.current = false;
       setAiBusy(false);
       setAnalyzeStep(0);
       setAi(null);
@@ -505,9 +528,36 @@ export default function SubmitReportClient({
   }
 
   /**
-   * Capture GPS and auto-detect the barangay. The citizen never picks a
-   * barangay — the system resolves it from the coordinates.
+   * The ML image-similarity signal for the duplicate check, computed on
+   * this device: embed the citizen's first photo, fetch each candidate's
+   * first photo, embed it, and keep the best cosine similarity. Returns
+   * null when the embedder isn't ready or every fetch fails — the check
+   * then falls back to the server signals alone. Never throws.
    */
+  async function computeImageSimilarity(
+    candidates: SimilarReportInfo[]
+  ): Promise<{ id: string; similarity: number }[]> {
+    const first = filesRef.current[0];
+    if (!first || !candidates.length) return [];
+    const myEmbedding = await embedImage(first);
+    if (!myEmbedding) return [];
+    const out: { id: string; similarity: number }[] = [];
+    for (const c of candidates) {
+      if (!c.photoUrl) continue;
+      try {
+        const res = await fetch(c.photoUrl);
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        const emb = await embedImage(blob);
+        if (!emb) continue;
+        out.push({ id: c.reportId, similarity: cosineSimilarity(myEmbedding, emb) });
+      } catch {
+        // photo fetch failed — skip this candidate's image signal
+      }
+    }
+    return out;
+  }
+
   /**
    * Capture GPS and auto-detect the barangay. The citizen never picks a
    * barangay — the system resolves it from the coordinates.
@@ -646,6 +696,72 @@ export default function SubmitReportClient({
         photoHashes.push(await sha256Hex(await f.arrayBuffer()));
       }
 
+      /* -------- pre-submission duplicate check (before ANY insert) --------
+         The AI compares the new photo + location + text against recent
+         active reports nearby. On a strong match the citizen gets a popup
+         with the existing report (reference, status, photo) and chooses:
+         view it, go back, or confirm it's genuinely a different issue.      */
+      if (!duplicateGate.current) {
+        const check = await findSimilarReports({
+          title:
+            title.trim() ||
+            description.trim().slice(0, 60) ||
+            addressText?.split(",")[0]?.trim() ||
+            "Community report",
+          description,
+          categoryId,
+          latitude: coords?.lat ?? null,
+          longitude: coords?.lng ?? null,
+          photoHashes,
+        });
+        if (check.ok && check.similar.length > 0) {
+          // refine with on-device ML image similarity (CLIP embeddings)
+          const imgScores = await computeImageSimilarity(check.similar);
+          const imgById = new Map(imgScores.map((s) => [s.id, s.similarity]));
+          const refined = check.similar
+            .map((c) => {
+              const img = imgById.get(c.reportId);
+              return {
+                candidate: {
+                  reportId: c.reportId,
+                  refCode: c.refCode,
+                  title: c.title,
+                  status: c.status,
+                  distanceM: c.distanceM,
+                  // fold the ML signal in: image match alone can reach the
+                  // popup bar, otherwise it strengthens the combined score
+                  score: img != null ? Math.min(1, c.score + img * 0.45) : c.score,
+                  signals: [
+                    ...c.signals,
+                    ...(img != null && img >= 0.85
+                      ? [{ signal: "ai_image", score: img }]
+                      : []),
+                  ],
+                  photoUrl: c.photoUrl,
+                  createdAt: c.createdAt,
+                } satisfies DupCandidate,
+                _img: img,
+                _serverScore: c.score,
+              };
+            })
+            .sort((a, b) => b.candidate.score - a.candidate.score);
+
+          // strong match: ML image ≥ 0.85, or combined score ≥ 0.7,
+          // or (score ≥ 0.55 AND genuinely close ≤ 150 m)
+          const top = refined[0];
+          const strong =
+            (top._img != null && top._img >= 0.85) ||
+            top.candidate.score >= 0.7 ||
+            (top.candidate.score >= 0.55 && (top.candidate.distanceM ?? Infinity) <= 150);
+          if (strong) {
+            duplicateGate.current = true; // next submit goes straight through
+            setDupCandidate(top.candidate);
+            setSubmitting(false);
+            return; // popup shown — nothing has been submitted
+          }
+        }
+      }
+
       const res = await createReport({
         // title is auto-filled from the AI result + GPS; fall back to the
         // description / detected address if the analysis never ran
@@ -665,6 +781,15 @@ export default function SubmitReportClient({
         // exactly this instead of re-running server CLIP (unavailable on
         // serverless hosts, which showed "0% Unrecognized" for every report)
         aiVerdict: lastVerdictRef.current,
+        duplicateHint: dupCandidateRef.current
+          ? {
+              similarReportId: dupCandidateRef.current.reportId,
+              score: dupCandidateRef.current.score,
+              imageSimilarity:
+                dupCandidateRef.current.signals.find((s) => s.signal === "ai_image")?.score ??
+                null,
+            }
+          : null,
       });
       if (!res.ok) throw new Error(res.error ?? "Failed to submit report");
 
@@ -672,12 +797,35 @@ export default function SubmitReportClient({
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
+      setDupCandidate(null); // failed submissions close the popup; the gate
+      // stays set — the citizen was already warned once this session
       setSubmitting(false);
     }
   }
 
   return (
     <div className="mx-auto max-w-lg space-y-4">
+      {/* duplicate warning — blocks submission until the citizen chooses */}
+      {dupCandidate && (
+        <DuplicatePopup
+          candidate={dupCandidate}
+          onCancel={() => {
+            setDupCandidate(null);
+            // re-arm the check — the citizen may edit the description or
+            // swap the photo, and the next submit should re-evaluate
+            duplicateGate.current = false;
+            setSubmitting(false);
+          }}
+          onContinue={() => {
+            // citizen confirmed it's a different issue — file the report
+            duplicateGate.current = true;
+            void (async () => {
+              const fake = { preventDefault: () => {} } as React.FormEvent;
+              await onSubmit(fake);
+            })();
+          }}
+        />
+      )}
       <div>
         <h1 className="text-xl font-extrabold tracking-tight text-slate-900">
           Report an issue

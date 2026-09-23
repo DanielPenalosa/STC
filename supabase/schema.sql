@@ -193,11 +193,14 @@ create table if not exists public.ai_analysis (
 );
 
 -- report_duplicates (duplicate-report detection evidence)
+-- signal values: 'photo' | 'text' | 'location' | 'category' | 'ai_image'
+-- ('ai_image' = browser CLIP embedding similarity from the pre-submission
+-- duplicate check — see migration-20260923-duplicate-ai-image.sql)
 create table if not exists public.report_duplicates (
   id            uuid primary key default gen_random_uuid(),
   report_id     uuid not null references public.reports(id) on delete cascade,
   similar_report_id uuid not null references public.reports(id) on delete cascade,
-  signal        text not null check (signal in ('photo','text','location','category')),
+  signal        text not null check (signal in ('photo','text','location','category','ai_image')),
   score         double precision not null check (score between 0 and 1),
   details       jsonb not null default '{}'::jsonb,
   created_at    timestamptz not null default now(),
