@@ -8,41 +8,15 @@
  *
  * All outputs are recommendations. Never throws.
  */
-import { clipClassify, type ClipScored } from "./clip";
-import { ISSUE_LABELS, categorySlugForIssue, type IssueLabel } from "./labels";
-import { scoreUrgency, type UrgencyResult } from "./urgency";
-import { routeReport, type RoutingDecision } from "./routing";
-import { CONFIDENCE_THRESHOLD } from "@/lib/ai/vision";
+import { clipClassify } from "./clip";
+import { ISSUE_LABELS, type IssueLabel } from "./labels";
+import { decideFromClipScores, type VerdictResult } from "./decision";
 
 export { ISSUE_LABELS };
-export type { UrgencyResult, RoutingDecision };
+export type { UrgencyResult } from "./urgency";
+export type { RoutingDecision } from "./routing";
 
-export type LocalAiResult = {
-  ok: boolean;
-  /** primary detected issue (null → needs review) */
-  issue: IssueLabel | null;
-  /** CLIP prompt-key of the primary issue */
-  issueKey: string | null;
-  /** secondary issues spotted in the same photo */
-  secondary: { key: string; title: string; score: number }[];
-  confidence: number;
-  urgency: UrgencyResult | null;
-  routing: RoutingDecision | null;
-  /** categories.slug matching the detected issue — form auto-fill */
-  suggestedCategorySlug: string | null;
-  quality: { ok: boolean; reason?: string | null };
-  /** photo has nothing to do with civic issues (selfie, food, screenshot…) */
-  unrelated: boolean;
-  /**
-   * the ANALYSIS ITSELF failed (model load, inference crash, corrupt file) —
-   * distinct from quality:false. The UI must never tell the citizen their
-   * photo is bad when the truth is the AI couldn't run.
-   */
-  analysis_failed: boolean;
-  needs_review: boolean;
-  needs_review_reason: string | null;
-  model_used: string;
-};
+export type LocalAiResult = VerdictResult;
 
 function failedResult(error: string, model: string): LocalAiResult {
   return {
@@ -81,126 +55,23 @@ export async function analyzePhotoLocally(input: {
   if (clip.outcome === "failed") {
     return failedResult(clip.error, clip.model);
   }
-
-  // quality gate — the model judged the PHOTO unusable (dark/blurry/blown out)
-  if (clip.outcome === "quality" || !clip.quality.ok) {
-    const reason =
-      clip.quality.reason === "too_blurry"
-        ? "Photo appears blurry — please retake it or submit for manual review."
-        : clip.quality.reason === "too_dark"
-          ? "Photo is too dark to analyze reliably."
-          : "Photo quality is too low for reliable analysis.";
-    return {
-      ok: false,
-      issue: null,
-      issueKey: null,
-      secondary: [],
+  if (clip.outcome === "quality") {
+    return decideFromClipScores({
+      results: [],
       confidence: 0,
-      urgency: null,
-      routing: null,
-      suggestedCategorySlug: null,
       quality: clip.quality,
-      unrelated: false,
-      analysis_failed: false,
-      needs_review: true,
-      needs_review_reason: reason,
-      model_used: clip.model,
-    };
-  }
-
-  const best: ClipScored | undefined = clip.results[0];
-
-  // off-topic gate — an "unrelated_content" prompt clearly beating every
-  // civic label means the photo isn't about infrastructure at all
-  const bestUnrelated = Math.max(
-    0,
-    ...clip.results.filter((r) => r.key === UNRELATED_KEY).map((r) => r.score)
-  );
-  const bestCivic = Math.max(
-    0,
-    ...clip.results
-      .filter((r) => r.key !== UNRELATED_KEY && r.key !== "no_issue")
-      .map((r) => r.score)
-  );
-  if (bestUnrelated > 0.15 && bestUnrelated > bestCivic * 1.2) {
-    return {
-      ok: false,
-      issue: null,
-      issueKey: null,
-      secondary: [],
-      confidence: Number(bestUnrelated.toFixed(3)),
-      urgency: null,
-      routing: null,
-      suggestedCategorySlug: null,
-      quality: clip.quality,
-      unrelated: true,
-      analysis_failed: false,
-      needs_review: true,
-      needs_review_reason:
-        "The photo doesn't appear to show a community infrastructure issue — please upload a photo of the actual problem.",
-      model_used: clip.model,
-    };
-  }
-
-  // "no_issue" winning, or everything far below the winner → needs review.
-  // The old bar (score > 0.3) was too strict for CLIP's soft multi-label
-  // scores on real-world phone photos: genuine issues often score 0.2–0.5
-  // while unrelated prompts soak up the remaining probability mass.
-  const meaningful = clip.results.filter(
-    (r) => r.key !== "no_issue" && r.key !== UNRELATED_KEY && r.score > 0.08
-  );
-  const primary =
-    best &&
-    best.key !== "no_issue" &&
-    best.key !== UNRELATED_KEY &&
-    best.score > 0.15
-      ? ISSUE_LABELS.find((l) => l.key === best.key) ?? null
-      : null;
-
-  const secondary = meaningful
-    .filter((r) => r.key !== best?.key)
-    .slice(0, 3)
-    .map((r) => {
-      const label = ISSUE_LABELS.find((l) => l.key === r.key);
-      return { key: r.key, title: label?.title ?? r.key, score: Number(r.score.toFixed(3)) };
     });
+  }
 
-  const confidence = primary ? clip.confidence : Math.min(clip.confidence, 0.45);
-  const needsReview =
-    !primary || confidence < CONFIDENCE_THRESHOLD || best?.key === "no_issue";
-
-  const urgency = scoreUrgency({
-    issue: primary,
-    title: input.title ?? "",
-    description: input.description ?? "",
-  });
-
-  const routing = routeReport({
-    issueKey: primary?.key ?? null,
-    urgency: urgency.level,
-    title: input.title ?? "",
-    description: input.description ?? "",
-    categoryHandling: input.categoryHandling ?? null,
-  });
-
-  return {
-    ok: Boolean(primary),
-    issue: primary,
-    issueKey: primary?.key ?? null,
-    secondary,
-    confidence,
-    urgency,
-    routing,
-    suggestedCategorySlug: categorySlugForIssue(primary?.key),
+  // one shared decision core — the browser classifier runs the exact same
+  // rules, so the citizen's pre-check and the server's post-submission
+  // analysis can never disagree
+  return decideFromClipScores({
+    results: clip.results.map((r) => ({ key: r.key, score: r.score })),
+    confidence: clip.confidence,
     quality: clip.quality,
-    unrelated: false,
-    analysis_failed: false,
-    needs_review: needsReview,
-    needs_review_reason: needsReview
-      ? primary
-        ? `Low confidence (${Math.round(confidence * 100)}%) — please verify the classification.`
-        : "No clear civic issue detected in the photo — manual review recommended."
-      : null,
-    model_used: clip.model,
-  };
+    title: input.title,
+    description: input.description,
+    categoryHandling: input.categoryHandling,
+  });
 }

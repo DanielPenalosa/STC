@@ -1,9 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { compressImage } from "@/lib/compress";
+import {
+  classifyPhotoInBrowser,
+  preloadBrowserModel,
+} from "@/lib/ai/local/browser-clip";
 import { createReport } from "@/app/actions/reports";
 import { btn, inputCls, Card } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -228,6 +232,12 @@ export default function SubmitReportClient({
   filesRef.current = files;
   const analyzeRetry = useRef(0);
 
+  // start downloading the browser AI model on mount — it overlaps with the
+  // citizen picking a photo instead of delaying the first analysis
+  useEffect(() => {
+    preloadBrowserModel();
+  }, []);
+
   /**
    * Photo picked (camera or gallery): kick off the server upload immediately
    * so it can be cancelled individually, then run the AI analysis on the
@@ -288,21 +298,38 @@ export default function SubmitReportClient({
     setAiBusy(true);
     setAnalyzeStep(0);
     const token = ++analyzeToken.current;
-
-    // kick off GPS detection in parallel with the photo analysis — the
-    // citizen never taps "Detect my barangay" (manual retry still exists)
-    if (detectionRef.current.phase === "idle" && !autoLocated.current) {
-      startGpsDetection({ auto: true });
-    }
     const started = Date.now();
     let response: Record<string, unknown> | null = null;
     const stepTimer = setInterval(() => {
       setAnalyzeStep((s) => Math.min(s + 1, ANALYZE_STEPS.length - 1));
     }, 1300);
     try {
-      // compress BEFORE analyzing: phones submit 3–8 MB camera JPEGs and
-      // uploading those raw made mobile analysis slow/flaky — the analyzer
-      // itself only reads 224×224 pixels, so quality is unaffected
+      // BROWSER model first — the photo is analyzed on-device with the same
+      // CLIP model + decision rules, so the verdict no longer depends on the
+      // server being able to hold a 150 MB model (serverless deploys can't,
+      // which is why the deployed link always showed "AI check unavailable")
+      const verdict = await classifyPhotoInBrowser(first, {
+        description,
+      });
+      if (!verdict.failed) {
+        response = {
+          detected_issue: verdict.issue?.title ?? "Unrecognized",
+          urgency: verdict.urgency?.level ?? null,
+          confidence: verdict.confidence,
+          reason: verdict.urgency?.reason ?? verdict.needs_review_reason ?? null,
+          needs_review: verdict.needs_review,
+          needs_review_reason: verdict.needs_review_reason,
+          secondary_issues: verdict.secondary.map((s) => s.title),
+          suggested_level: verdict.routing?.level ?? null,
+          suggested_department: verdict.routing?.departmentHint ?? null,
+          quality: verdict.quality,
+          unrelated: verdict.unrelated,
+          analysis_failed: verdict.analysis_failed,
+          suggested_category_slug: verdict.suggestedCategorySlug,
+        };
+        return; // done — the finally block handles the UI handoff
+      }
+      // browser path unavailable → server fallback (local dev, warm VPS)
       const fd = new FormData();
       fd.append("photo", await compressImage(first));
       fd.append("description", description);
