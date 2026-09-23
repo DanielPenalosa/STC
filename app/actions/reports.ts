@@ -26,6 +26,21 @@ export type NewReportInput = {
   addressText: string | null;
   photoPaths: string[]; // storage paths already uploaded client-side
   photoHashes?: string[]; // sha-256 per photo (same order) for duplicate detection
+  /**
+   * Analysis the citizen's browser computed at photo-pick time (CLIP WASM).
+   * The post-submission pipeline rebuilds its verdict from this instead of
+   * re-running server CLIP, which serverless hosts can't do. Shape-checked
+   * and clamped server-side — never trusted blindly.
+   */
+  aiVerdict?: {
+    issueKey: string | null;
+    issueTitle: string | null;
+    confidence: number;
+    quality: { ok: boolean; reason?: string | null };
+    unrelated: boolean;
+    secondary?: { key: string; title: string; score: number }[];
+    model_used: string;
+  } | null;
 };
 
 export async function createReport(
@@ -116,8 +131,40 @@ export async function createReport(
     });
   }
 
-  // fire-and-forget AI analysis (recommendation only)
-  void runAiAnalysis(reportId);
+  // fire-and-forget AI analysis (recommendation only) — prefer the verdict
+  // computed in the citizen's browser; sanitize before it crosses the boundary
+  const v = input.aiVerdict;
+  const clientVerdict =
+    v && typeof v === "object" && typeof v.model_used === "string"
+      ? {
+          issueKey:
+            typeof v.issueKey === "string" && v.issueKey.length < 64
+              ? v.issueKey
+              : null,
+          issueTitle:
+            typeof v.issueTitle === "string" && v.issueTitle.length < 120
+              ? v.issueTitle
+              : null,
+          confidence: Math.max(0, Math.min(1, Number(v.confidence) || 0)),
+          quality: {
+            ok: Boolean(v.quality?.ok),
+            reason:
+              typeof v.quality?.reason === "string" && v.quality.reason.length < 32
+                ? v.quality.reason
+                : null,
+          },
+          unrelated: Boolean(v.unrelated),
+          secondary: Array.isArray(v.secondary)
+            ? v.secondary.slice(0, 3).map((s) => ({
+                key: String(s?.key ?? "").slice(0, 64),
+                title: String(s?.title ?? "").slice(0, 120),
+                score: Math.max(0, Math.min(1, Number(s?.score) || 0)),
+              }))
+            : [],
+          model_used: v.model_used.slice(0, 120),
+        }
+      : null;
+  void runAiAnalysis(reportId, clientVerdict);
 
   // fire-and-forget duplicate detection — flags the report + notifies admins
   // when it looks like a copy; never blocks the submission

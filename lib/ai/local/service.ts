@@ -18,6 +18,10 @@
  */
 import { createAdminClient } from "@/lib/supabase/admin";
 import { analyzePhotoLocally, type LocalAiResult } from "./pipeline";
+import {
+  decideFromClientVerdict,
+  type ClientAiVerdict,
+} from "./decision";
 import { DEPARTMENT_KEYWORDS } from "./labels";
 
 type DeptRow = { id: string; slug: string | null; name: string };
@@ -80,9 +84,18 @@ function pickDepartment(
   return null;
 }
 
-/** Run the full post-submission AI flow for one report. Never throws. */
+/**
+ * Run the full post-submission AI flow for one report. Never throws.
+ *
+ * `clientVerdict` — the analysis the citizen's BROWSER already computed at
+ * photo-pick time. Preferred whenever present: serverless hosts can't run
+ * server-side CLIP at all (onnxruntime-node unavailable), and re-analyzing
+ * wastes CPU even where it works. The verdict is rebuilt through the shared
+ * decision core so it matches the citizen's pre-check exactly.
+ */
 export async function runLocalAnalysisForReport(
-  reportId: string
+  reportId: string,
+  clientVerdict?: ClientAiVerdict | null
 ): Promise<ServiceResult> {
   const empty: ServiceResult = { analysisId: null, auto_assigned: false, assigned_to: null };
   try {
@@ -125,9 +138,16 @@ export async function runLocalAnalysisForReport(
       .limit(1);
     const photoPath = photos?.[0]?.storage_path ?? null;
 
-    // 2. run the local pipeline (no photo → text-only routing, flagged for review)
+    // 2. run the analysis — client verdict first (no server model needed),
+    // server CLIP as fallback, text-only routing when there's no photo
     let result: LocalAiResult;
-    if (photoPath) {
+    if (clientVerdict) {
+      result = decideFromClientVerdict(clientVerdict, {
+        title: rep.title,
+        description: rep.description,
+        categoryHandling: rep.categories?.handling_level ?? null,
+      });
+    } else if (photoPath) {
       const photo = await loadPhotoBytes(photoPath);
       result = photo
         ? await analyzePhotoLocally({
@@ -190,7 +210,17 @@ export async function runLocalAnalysisForReport(
       ? pickDepartment(departments, rep.categories?.default_department_id ?? null, departmentHint)
       : null;
 
-    const categoryId = rep.categories?.id ?? null;
+    // prefer the AI-matched category (by slug) when the report has none —
+    // the citizen form auto-fills it, but only when the match succeeded
+    let categoryId = rep.categories?.id ?? null;
+    if (!categoryId && result.suggestedCategorySlug) {
+      const { data: cat } = await admin
+        .from("categories")
+        .select("id")
+        .eq("slug", result.suggestedCategorySlug)
+        .maybeSingle();
+      if (cat?.id) categoryId = cat.id as string;
+    }
 
     // 4. persist the recommendation
     const { data: inserted, error: insertError } = await admin

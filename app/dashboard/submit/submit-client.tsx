@@ -231,6 +231,10 @@ export default function SubmitReportClient({
   const filesRef = useRef<File[]>([]);
   filesRef.current = files;
   const analyzeRetry = useRef(0);
+  // last SUCCESSFUL analysis (browser or server) — forwarded to createReport
+  // so the admin side shows the same verdict instead of re-running server
+  // CLIP (impossible on serverless hosts → "0% Unrecognized")
+  const lastVerdictRef = useRef<import("@/lib/ai/local/decision").ClientAiVerdict | null>(null);
 
   // start downloading the browser AI model on mount — it overlaps with the
   // citizen picking a photo instead of delaying the first analysis
@@ -277,6 +281,7 @@ export default function SubmitReportClient({
 
     if (!arr[0]) {
       setAi(null);
+      lastVerdictRef.current = null;
       return;
     }
     // kick off GPS detection in parallel with the photo analysis — the
@@ -312,6 +317,15 @@ export default function SubmitReportClient({
         description,
       });
       if (!verdict.failed) {
+        lastVerdictRef.current = {
+          issueKey: verdict.issueKey,
+          issueTitle: verdict.issue?.title ?? null,
+          confidence: verdict.confidence,
+          quality: verdict.quality,
+          unrelated: verdict.unrelated,
+          secondary: verdict.secondary,
+          model_used: "clip-vit-base-patch32 (Transformers.js)",
+        };
         response = {
           detected_issue: verdict.issue?.title ?? "Unrecognized",
           urgency: verdict.urgency?.level ?? null,
@@ -337,6 +351,28 @@ export default function SubmitReportClient({
       const json = await res.json();
       if (json.ok || json.detected_issue) {
         response = json;
+        // server fallback succeeded — forward THAT verdict on submit
+        lastVerdictRef.current = {
+          issueKey:
+            typeof json.suggested_category_key === "string"
+              ? json.suggested_category_key
+              : null,
+          issueTitle:
+            json.detected_issue && json.detected_issue !== "Unrecognized"
+              ? String(json.detected_issue)
+              : null,
+          confidence: Number(json.confidence ?? 0),
+          quality:
+            json.quality && typeof json.quality === "object"
+              ? {
+                  ok: Boolean(json.quality.ok),
+                  reason: json.quality.reason ?? null,
+                }
+              : { ok: true },
+          unrelated: Boolean(json.unrelated),
+          secondary: [],
+          model_used: "clip-vit-base-patch32 (server)",
+        };
       }
     } catch {
       // AI is advisory — the failure branch below handles the retry/UI
@@ -461,6 +497,7 @@ export default function SubmitReportClient({
       // AI pre-check was based on the first photo — kill it everywhere
       analyzeToken.current++;
       analyzeRetry.current = 0;
+      lastVerdictRef.current = null; // never forward a stale verdict
       setAiBusy(false);
       setAnalyzeStep(0);
       setAi(null);
@@ -624,6 +661,10 @@ export default function SubmitReportClient({
         addressText: addressText || null,
         photoPaths,
         photoHashes,
+        // the pre-check the citizen already saw — the admin AI card shows
+        // exactly this instead of re-running server CLIP (unavailable on
+        // serverless hosts, which showed "0% Unrecognized" for every report)
+        aiVerdict: lastVerdictRef.current,
       });
       if (!res.ok) throw new Error(res.error ?? "Failed to submit report");
 

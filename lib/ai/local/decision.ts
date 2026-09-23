@@ -45,6 +45,75 @@ export type VerdictResult = {
 
 const UNRELATED_KEY = "unrelated_content";
 
+/**
+ * What the citizen's browser computed at photo-pick time and the submit
+ * action forwards with the report. The admin-side analysis (serverless hosts
+ * can't run server CLIP at all) rebuilds the full verdict from it using the
+ * SAME shared decision core, so admins see exactly what the citizen saw.
+ */
+export type ClientAiVerdict = {
+  issueKey: string | null;
+  issueTitle: string | null;
+  confidence: number; // 0–1
+  quality: { ok: boolean; reason?: string | null };
+  unrelated: boolean;
+  secondary: { key: string; title: string; score: number }[];
+  model_used: string;
+};
+
+/**
+ * Build the full verdict from a client-supplied analysis (browser CLIP),
+ * recomputing urgency/routing server-side with the shared rules.
+ */
+export function decideFromClientVerdict(
+  client: ClientAiVerdict,
+  context: {
+    title?: string;
+    description?: string;
+    categoryHandling?: "barangay" | "municipal" | null;
+  } = {}
+): VerdictResult {
+  const model = `browser:${client.model_used}`;
+
+  // off-topic verdict — the browser already applied the unrelated gate and
+  // doesn't forward off-topic prompt scores, so rebuild that branch directly
+  if (client.unrelated) {
+    return {
+      ok: false,
+      issue: null,
+      issueKey: null,
+      secondary: [],
+      confidence: Number(client.confidence.toFixed(3)),
+      urgency: null,
+      routing: null,
+      suggestedCategorySlug: null,
+      quality: client.quality,
+      unrelated: true,
+      analysis_failed: false,
+      needs_review: true,
+      needs_review_reason:
+        "The photo doesn't appear to show a community infrastructure issue — please upload a photo of the actual problem.",
+      model_used: model,
+    };
+  }
+
+  // quality / primary / needs-review branches reproduce exactly: the client
+  // only sends issueKey when its own gate (score > 0.15) picked a primary,
+  // and the shared core applies the same thresholds to the same scores
+  const base = decideFromClipScores({
+    results: [
+      ...(client.issueKey ? [{ key: client.issueKey, score: client.confidence }] : []),
+      ...client.secondary.map((s) => ({ key: s.key, score: s.score })),
+    ],
+    confidence: client.confidence,
+    quality: client.quality,
+    title: context.title,
+    description: context.description,
+    categoryHandling: context.categoryHandling,
+  });
+  return { ...base, model_used: model };
+}
+
 /** Turn raw CLIP scores into the full verdict (never throws). */
 export function decideFromClipScores(input: VerdictInput): VerdictResult {
   const model = "local:clip-vit-base-patch32";
