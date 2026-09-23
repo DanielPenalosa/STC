@@ -48,6 +48,21 @@ export type ClipClassification =
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let pipelinePromise: Promise<any> | null = null;
+
+/**
+ * Pre-load the CLIP model without needing an image. Called once at server
+ * boot (instrumentation.ts) so the first real analyze isn't the one that
+ * pays the ~150 MB load — previously that cold start was the exact window
+ * where mobile uploads showed "AI check unavailable".
+ */
+export async function warmUpClip(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await getClassifier();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
 const MODEL_ID = "Xenova/clip-vit-base-patch32";
 export const CLIP_MODEL_ID = "local:clip-vit-base-patch32 (Transformers.js)";
 

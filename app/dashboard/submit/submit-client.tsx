@@ -223,17 +223,27 @@ export default function SubmitReportClient({
   // keyed by index so each thumbnail can be cancelled individually
   const [uploadedPaths, setUploadedPaths] = useState<(string | null)[]>([]);
   const [uploadingCount, setUploadingCount] = useState(0);
+  // keeps auto-retry from re-arming when the photo was removed mid-flight
+  const filesRef = useRef<File[]>([]);
+  filesRef.current = files;
+  const analyzeRetry = useRef(0);
 
+  /**
+   * Photo picked (camera or gallery): kick off the server upload immediately
+   * so it can be cancelled individually, then run the AI analysis on the
+   * compressed copy (raw camera files made mobile analysis slow/flaky).
+   */
   async function onPhotoSelected(fileList: FileList | null) {
     const arr = Array.from(fileList ?? []);
     setFiles(arr);
-    setPreviews((prev) => [...prev, ...arr.map((f) => URL.createObjectURL(f))]);
-    setUploadedPaths((prev) => [...prev, ...arr.map(() => null)]);
+    filesRef.current = arr;
+    setPreviews(arr.map((f) => URL.createObjectURL(f)));
+    setUploadedPaths(arr.map(() => null));
+    analyzeRetry.current = 0;
 
     // upload each photo NOW (not on submit) so it can be cancelled
     // individually before the report goes in
     for (let i = 0; i < arr.length; i++) {
-      const idx = files.length + i;
       setUploadingCount((c) => c + 1);
       void (async () => {
         try {
@@ -246,7 +256,7 @@ export default function SubmitReportClient({
           const upJson = await upRes.json().catch(() => ({}));
           if (!upRes.ok || !upJson.ok) throw new Error(upJson.error ?? "upload failed");
           const serverPath = String(upJson.path ?? path);
-          setUploadedPaths((prev) => prev.map((v, j) => (j === idx ? serverPath : v)));
+          setUploadedPaths((prev) => prev.map((v, j) => (j === i ? serverPath : v)));
         } catch {
           // keep the local file — submit will retry the upload
         } finally {
@@ -255,11 +265,26 @@ export default function SubmitReportClient({
       })();
     }
 
-    const first = arr[0];
-    if (!first || files.length > 0) {
-      if (!first) setAi(null);
+    if (!arr[0]) {
+      setAi(null);
       return;
     }
+    // kick off GPS detection in parallel with the photo analysis — the
+    // citizen never taps "Detect my barangay" (manual retry still exists)
+    if (detectionRef.current.phase === "idle" && !autoLocated.current) {
+      startGpsDetection({ auto: true });
+    }
+    await runAnalysis();
+  }
+
+  /**
+   * Analyze the first photo with the local CLIP pipeline. Runs once per
+   * photo selection, on manual retry, and once automatically after a
+   * failure — cold starts and flaky mobile signal are transient.
+   */
+  async function runAnalysis() {
+    const first = filesRef.current[0];
+    if (!first) return;
     setAiBusy(true);
     setAnalyzeStep(0);
     const token = ++analyzeToken.current;
@@ -275,8 +300,11 @@ export default function SubmitReportClient({
       setAnalyzeStep((s) => Math.min(s + 1, ANALYZE_STEPS.length - 1));
     }, 1300);
     try {
+      // compress BEFORE analyzing: phones submit 3–8 MB camera JPEGs and
+      // uploading those raw made mobile analysis slow/flaky — the analyzer
+      // itself only reads 224×224 pixels, so quality is unaffected
       const fd = new FormData();
-      fd.append("photo", first);
+      fd.append("photo", await compressImage(first));
       fd.append("description", description);
       const res = await fetch("/api/analyze", { method: "POST", body: fd });
       const json = await res.json();
@@ -284,7 +312,7 @@ export default function SubmitReportClient({
         response = json;
       }
     } catch {
-      // AI is advisory — ignore failures
+      // AI is advisory — the failure branch below handles the retry/UI
     } finally {
       // let the checklist run its full animation before the result swaps in
       const elapsed = Date.now() - started;
@@ -374,6 +402,17 @@ export default function SubmitReportClient({
           unrelated: false,
           analysisFailed: true,
         });
+        // mobile friendliness: cold starts and flaky signal are the usual
+        // culprit — retry once automatically after a short backoff
+        const attempt = analyzeRetry.current + 1;
+        analyzeRetry.current = attempt;
+        if (attempt <= 1) {
+          setTimeout(() => {
+            if (token === analyzeToken.current && filesRef.current.length > 0) {
+              void runAnalysis();
+            }
+          }, 2500);
+        }
       }
       setAiBusy(false);
     }
@@ -394,6 +433,7 @@ export default function SubmitReportClient({
     if (idx === 0) {
       // AI pre-check was based on the first photo — kill it everywhere
       analyzeToken.current++;
+      analyzeRetry.current = 0;
       setAiBusy(false);
       setAnalyzeStep(0);
       setAi(null);
@@ -685,6 +725,14 @@ export default function SubmitReportClient({
                   submit the report below; a staff member will review the photo
                   manually.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => void runAnalysis()}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 active:bg-slate-100"
+                >
+                  <Icon name="link" size="sm" />
+                  Try analyzing again
+                </button>
               </div>
             </div>
           )}
