@@ -328,7 +328,7 @@ export async function updateReportStatus(
       .is("completed_at", null);
   }
 
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   revalidatePath("/dashboard");
   return { ok: true };
 }
@@ -364,7 +364,7 @@ export async function addProgressNote(
     );
   }
 
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
@@ -408,7 +408,7 @@ export async function removeEvidencePhoto(
   const { error } = await supabase.from("report_photos").delete().eq("id", photoId);
   if (error) return { ok: false, error: error.message };
 
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
@@ -434,7 +434,7 @@ export async function uploadEvidencePhoto(
     .insert({ report_id: reportId, storage_path: path, kind: "resolution" });
   if (rowErr) console.error("report_photos insert failed:", rowErr.message);
 
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
@@ -462,7 +462,7 @@ export async function toggleFollow(
       .eq("report_id", reportId)
       .eq("user_id", profile.id);
     if (error) return { ok: false, error: error.message };
-    revalidatePath(`/reports/${reportId}`);
+    revalidatePath(`/dashboard/reports/${reportId}`);
     return { ok: true, following: false };
   }
 
@@ -470,7 +470,7 @@ export async function toggleFollow(
     .from("report_follows")
     .insert({ report_id: reportId, user_id: profile.id });
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true, following: true };
 }
 
@@ -507,7 +507,7 @@ export async function addFollowup(
   });
   if (error) return { ok: false, error: error.message };
 
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
@@ -549,6 +549,6 @@ export async function submitFeedback(
   });
   if (error) return { ok: false, error: error.message };
 
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }

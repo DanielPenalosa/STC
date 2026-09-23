@@ -45,7 +45,7 @@ export default async function AdminReportsPage({
     supabase
       .from("reports")
       .select(
-        `*, profiles:users!reports_user_id_fkey(full_name), categories(id, name, icon), barangays(id, name), departments(name),
+        `*, profiles:users!reports_user_id_fkey(full_name), categories(id, name, icon), barangays(id, name), departments(id, name),
        report_photos(storage_path, kind)`
       )
       .order("created_at", { ascending: false })

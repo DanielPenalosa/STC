@@ -279,11 +279,19 @@ export async function runLocalAnalysisForReport(
 
       if (!assignError) {
         assigned = { type: isBarangay ? "barangay" : "department", id: targetId, name: targetName };
+        // stamp the routing on the report itself (same as a manual admin
+        // assignment does) — every list/detail view reads these columns to
+        // display "Assigned to X", and the status bump uses the same
+        // guard as the manual flow: never override an earlier human decision
+        const routedPatch: Record<string, string> = {};
+        if (isBarangay) routedPatch.barangay_id = targetId;
+        else routedPatch.department_id = targetId;
+        routedPatch.status = "assigned";
         await admin
           .from("reports")
-          .update({ status: "assigned" })
+          .update(routedPatch)
           .eq("id", reportId)
-          .eq("status", "submitted"); // never override a human's earlier decision
+          .eq("status", "submitted"); // no-op when already verified/assigned
 
         // record the auto-assignment on the analysis row
         await admin

@@ -11,9 +11,18 @@ type Row = Report & {
   profiles: { full_name: string } | null;
   categories: { id: string; name: string; icon: string } | null;
   barangays: { id: string; name: string } | null;
-  departments: { name: string } | null;
+  departments: { id: string; name: string } | null;
   report_photos: { storage_path: string; kind: string }[];
 };
+
+/** "Utilities Office" / "Brgy. Zone I" / null — from the stamped routing. */
+function assignedUnit(r: Row): string | null {
+  if (r.department_id) return r.departments?.name ?? null;
+  if (r.barangay_id) return r.barangays?.name
+    ? `Brgy. ${r.barangays.name}`
+    : null;
+  return null;
+}
 
 export type HistoryEntry = {
   to_status: string;
@@ -82,7 +91,7 @@ export default function ReportsTable({
     title: r.title,
     category: r.categories?.name ?? "—",
     barangay: r.barangays?.name ?? "—",
-    department: r.departments?.name ?? "—",
+    department: assignedUnit(r) ?? "—",
     status: r.status,
     priority: r.priority,
     date: new Date(r.created_at).toLocaleDateString(),
@@ -106,6 +115,7 @@ export default function ReportsTable({
                 <th className="px-3 py-2.5 font-semibold">Type</th>
                 <th className="px-3 py-2.5 font-semibold">Location</th>
                 <th className="px-3 py-2.5 font-semibold">Reporter</th>
+                <th className="px-3 py-2.5 font-semibold">Assigned To</th>
                 <th className="px-3 py-2.5 font-semibold">Date &amp; Time</th>
                 <th className="px-3 py-2.5 font-semibold">Status</th>
                 <th className="px-3 py-2.5" />
@@ -139,6 +149,13 @@ export default function ReportsTable({
                   </td>
                   <td className="px-3 py-2.5 text-xs text-slate-600">
                     {r.profiles?.full_name ?? "Citizen"}
+                  </td>
+                  <td className="px-3 py-2.5 text-xs">
+                    {assignedUnit(r) ? (
+                      <span className="font-medium text-slate-700">{assignedUnit(r)}</span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2.5 text-xs text-slate-400">
                     {new Date(r.created_at).toLocaleDateString(undefined, {
@@ -189,7 +206,7 @@ export default function ReportsTable({
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
                     No reports match the current filters.
                   </td>
                 </tr>
@@ -287,6 +304,18 @@ export default function ReportsTable({
                   <StatusBadge status={active.status} />
                 </div>
               </div>
+
+              {/* assigned unit — so admins know exactly where the report sits */}
+              {assignedUnit(active) && (
+                <div className="flex items-center gap-2.5 rounded-xl bg-primary-50 px-3.5 py-2.5">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-100 text-primary-700">
+                    <Icon name="clipboard" size="sm" />
+                  </span>
+                  <p className="text-xs font-semibold text-primary-800">
+                    Assigned to {assignedUnit(active)}
+                  </p>
+                </div>
+              )}
 
               {/* location + map link */}
               <div className="flex items-start gap-2.5">

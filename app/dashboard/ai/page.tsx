@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Card, PageHeader, EmptyState } from "@/components/ui";
+import { Icon } from "@/components/icons";
 import AiRowActions from "./row-actions";
 import { CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import type { AiAnalysis, Report } from "@/lib/types";
@@ -25,6 +26,49 @@ export default async function AiAnalysisPage() {
   const rows = (data as unknown as (AiAnalysis & {
     reports: Report | null;
   })[]) ?? [];
+
+  // resolve the CURRENT assignment for every queued report so admins see
+  // exactly where each one is already routed (AI or human — indistinguishable
+  // by design: the truth of "who owns it" matters, not who wrote it)
+  const reportIds = Array.from(
+    new Set(rows.map((r) => r.report_id).filter((v): v is string => Boolean(v)))
+  );
+  const { data: assignRows } = reportIds.length
+    ? await supabase
+        .from("assignments")
+        .select(
+          `report_id, assigned_type, department_id, barangay_id, assigned_by, accepted_at,
+           departments(name), barangays(name)`
+        )
+        .in("report_id", reportIds)
+        .order("created_at", { ascending: true })
+    : { data: [] as Record<string, unknown>[] | null };
+  const assignedByReport = new Map<
+    string,
+    { label: string; accepted: boolean; auto: boolean }
+  >();
+  for (const a of (assignRows as unknown as
+    | {
+        report_id: string;
+        assigned_type: "department" | "barangay";
+        department_id: string | null;
+        barangay_id: string | null;
+        assigned_by: string | null;
+        accepted_at: string | null;
+        departments: { name: string } | null;
+        barangays: { name: string } | null;
+      }[]
+    | null) ?? []) {
+    // last assignment wins
+    assignedByReport.set(a.report_id, {
+      label:
+        a.assigned_type === "department"
+          ? a.departments?.name ?? "a department"
+          : a.barangays?.name ?? "a barangay",
+      accepted: Boolean(a.accepted_at),
+      auto: a.assigned_by == null,
+    });
+  }
 
   const pending = rows.filter((r) => r.status !== "reviewed");
   const autoAssigned = rows.filter((r) => r.auto_assigned).length;
@@ -52,6 +96,9 @@ export default async function AiAnalysisPage() {
         <div className="space-y-3">
           {pending.map((row) => {
             const low = (row.confidence ?? 0) < CONFIDENCE_THRESHOLD;
+            const assigned = row.report_id
+              ? assignedByReport.get(row.report_id) ?? null
+              : null;
             return (
               <Card key={row.id} className={`p-4 ${low ? "border-warn-300" : ""}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -92,6 +139,15 @@ export default async function AiAnalysisPage() {
                     </p>
                     {row.reason && (
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{row.reason}</p>
+                    )}
+                    {assigned && (
+                      <p className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-primary-50 px-2.5 py-1.5 text-xs font-semibold text-primary-700">
+                        <Icon name="clipboard" size="sm" />
+                        Already assigned to {assigned.label}
+                        {assigned.accepted
+                          ? " — the unit has accepted and is working on it."
+                          : " — waiting for the unit to accept. No action needed unless you want to re-route."}
+                      </p>
                     )}
                     <p className="mt-1 text-xs text-slate-500">
                       Suggests: {row.reports?.categories?.name ?? "no category"} · {row.reports?.departments?.name ?? "no department"} · {row.reports?.barangays?.name ?? "no barangay"} · model {row.model_used}

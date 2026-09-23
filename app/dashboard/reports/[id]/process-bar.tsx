@@ -44,7 +44,7 @@ export default function ProcessBar({
 
   return (
     <div className={bare ? "" : "rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm sm:p-4"}>
-      <ol className="flex items-start gap-0 overflow-x-auto pb-1">
+      <ol className="-mx-1 flex items-start gap-0 overflow-x-auto px-1 pb-1">
         {STATUS_FLOW.map((step, i) => {
           const done = i < current;
           const active = i === current;
@@ -79,8 +79,9 @@ export default function ProcessBar({
                 >
                   {STATUS_LABELS[step]}
                 </span>
-                {/* timestamp */}
-                <span className="whitespace-nowrap text-center text-[9px] leading-tight text-slate-400">
+                {/* timestamp — hidden on phones where 7 steps don't fit
+                    horizontally; the timeline below carries the dates */}
+                <span className="hidden whitespace-nowrap text-center text-[9px] leading-tight text-slate-400 sm:block">
                   {done || active ? dates?.[step] ?? "" : ""}
                 </span>
               </div>

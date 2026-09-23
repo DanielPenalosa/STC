@@ -101,7 +101,7 @@ export async function setReportStatus(
     .eq("id", reportId);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/dashboard/reports");
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
@@ -117,7 +117,7 @@ export async function setPriority(
     .eq("id", reportId);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/dashboard/reports");
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
@@ -225,7 +225,7 @@ export async function assignReport(
   }
 
   revalidatePath("/dashboard/reports");
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
@@ -253,7 +253,7 @@ export async function dismissDuplicateFlag(reportId: string): Promise<ActionResu
     .eq("id", reportId);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/dashboard/reports");
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
@@ -294,8 +294,8 @@ export async function markAsDuplicate(
   });
 
   revalidatePath("/dashboard/reports");
-  revalidatePath(`/reports/${reportId}`);
-  revalidatePath(`/reports/${originalId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${originalId}`);
   return { ok: true };
 }
 
@@ -332,7 +332,7 @@ export async function overrideAi(
     .in("status", ["completed", "low_confidence", "pending"]);
 
   revalidatePath("/dashboard/ai");
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
@@ -392,7 +392,7 @@ export async function acceptAiSuggestion(reportId: string): Promise<ActionResult
     .eq("report_id", reportId);
 
   revalidatePath("/dashboard/ai");
-  revalidatePath(`/reports/${reportId}`);
+  revalidatePath(`/dashboard/reports/${reportId}`);
   return { ok: true };
 }
 
