@@ -25,7 +25,7 @@ export default function AiRowActions({
 
   return (
     <div className="flex shrink-0 items-center gap-2">
-      <Link href={`/reports/${reportId}`} className="text-xs font-semibold text-primary-600 hover:underline">
+      <Link href={`/dashboard/reports/${reportId}`} className="text-xs font-semibold text-primary-600 hover:underline">
         Open
       </Link>
       <button

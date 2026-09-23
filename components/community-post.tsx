@@ -87,7 +87,7 @@ export function CommunityPost({ post }: { post: CommunityPostData }) {
           </p>
         </div>
         <Link
-          href={`/reports/${post.id}`}
+          href={`/dashboard/reports/${post.id}`}
           className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${STATUS_PILL[post.status]}`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[post.status]}`} />
@@ -96,7 +96,7 @@ export function CommunityPost({ post }: { post: CommunityPostData }) {
       </div>
 
       {/* ---------- photo strip ---------- */}
-      <Link href={`/reports/${post.id}`} className="block bg-slate-100">
+      <Link href={`/dashboard/reports/${post.id}`} className="block bg-slate-100">
         {photos.length > 0 ? (
           <div className={`grid gap-px ${photos.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
             {photos.map((src, i) => (

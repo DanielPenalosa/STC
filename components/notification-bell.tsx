@@ -84,7 +84,7 @@ export function NotificationBell() {
             {notifications.slice(0, 8).map((n) => (
               <Link
                 key={n.id}
-                href={n.report_id ? `/reports/${n.report_id}` : "#"}
+                href={n.report_id ? `/dashboard/reports/${n.report_id}` : "#"}
                 onClick={() => void onItemClick(n)}
                 className={`flex items-start gap-2 border-b px-4 py-3 text-sm last:border-0 hover:bg-slate-50 ${
                   n.is_read ? "" : "bg-primary-50/60"

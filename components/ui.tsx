@@ -150,7 +150,7 @@ export function ReportCard({
 }) {
   return (
     <Link
-      href={`/reports/${id}`}
+      href={`/dashboard/reports/${id}`}
       className="hover-lift block rounded-xl border border-slate-200 bg-white"
     >
       <div className="flex gap-3 p-3">

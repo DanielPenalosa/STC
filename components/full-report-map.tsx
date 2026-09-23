@@ -116,7 +116,7 @@ export default function FullReportMap({
         iconAnchor: [8, 8],
       });
       return L.marker([p.lat, p.lng], { icon, title: p.label }).bindPopup(
-        `${p.photoUrl ? `<img src="${p.photoUrl}" alt="" style="display:block;width:200px;height:110px;object-fit:cover;border-radius:8px;margin-bottom:8px" onerror="this.style.display='none'"/>` : ""}<a href="/reports/${p.id}" style="font-weight:700;font-size:14px;color:#0f172a;text-decoration:none">${p.label}</a><br/><span style="font-size:12px;color:#64748b">${p.barangay ? p.barangay + " · " : ""}${p.status.replace(/_/g, " ")}</span><br/><a href="/reports/${p.id}" style="display:inline-block;margin-top:6px;background:#2333A0;color:#fff;font-size:12px;font-weight:600;padding:5px 10px;border-radius:6px;text-decoration:none">View Report →</a>`,
+        `${p.photoUrl ? `<img src="${p.photoUrl}" alt="" style="display:block;width:200px;height:110px;object-fit:cover;border-radius:8px;margin-bottom:8px" onerror="this.style.display='none'"/>` : ""}<a href="/dashboard/reports/${p.id}" style="font-weight:700;font-size:14px;color:#0f172a;text-decoration:none">${p.label}</a><br/><span style="font-size:12px;color:#64748b">${p.barangay ? p.barangay + " · " : ""}${p.status.replace(/_/g, " ")}</span><br/><a href="/dashboard/reports/${p.id}" style="display:inline-block;margin-top:6px;background:#2333A0;color:#fff;font-size:12px;font-weight:600;padding:5px 10px;border-radius:6px;text-decoration:none">View Report →</a>`,
         { closeButton: true, offset: [0, -4], maxWidth: 220 }
       );
     });

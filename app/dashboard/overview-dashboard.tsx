@@ -415,12 +415,12 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
                 {reports.slice(0, 6).map((r) => (
                   <tr key={r.id} className="transition hover:bg-slate-50/70">
                     <td className="px-4 py-2.5">
-                      <Link href={`/reports/${r.id}`} className="font-mono text-xs font-semibold text-primary-600 hover:underline">
+                      <Link href={`/dashboard/reports/${r.id}`} className="font-mono text-xs font-semibold text-primary-600 hover:underline">
                         {r.ref_code}
                       </Link>
                     </td>
                     <td className="max-w-[180px] truncate px-2 py-2.5">
-                      <Link href={`/reports/${r.id}`} className="font-medium text-slate-700 hover:text-primary-600">
+                      <Link href={`/dashboard/reports/${r.id}`} className="font-medium text-slate-700 hover:text-primary-600">
                         {r.title}
                       </Link>
                     </td>

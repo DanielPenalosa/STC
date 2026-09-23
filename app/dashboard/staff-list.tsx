@@ -23,7 +23,7 @@ export default function StaffReportList({
   return (
     <Card className="divide-y divide-slate-100">
       {reports.map((r) => (
-        <Link key={r.id} href={`/reports/${r.id}`} className="flex items-center justify-between gap-3 p-4 hover:bg-slate-50">
+        <Link key={r.id} href={`/dashboard/reports/${r.id}`} className="flex items-center justify-between gap-3 p-4 hover:bg-slate-50">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{r.title}</p>
             <p className="text-xs text-slate-400">

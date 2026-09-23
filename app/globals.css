@@ -86,19 +86,49 @@ body {
 @keyframes page-in {
   from {
     opacity: 0;
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
+/*
+ * Page entrance. Deliberately GENTLE — a short rise+fade that starts almost
+ * settled (10px, 0.28s) so navigation reads as smooth motion, not a reload.
+ * The route skeleton (loading.tsx) renders inside this same wrapper, so the
+ * animation plays once at navigation start and the real content swaps in
+ * silently underneath — no flash, no replay, no layout jump.
+ */
 .page-enter {
-  animation: page-in 0.16s ease-out both;
+  animation: page-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .page-enter {
     animation: none;
+  }
+}
+
+/*
+ * Tap feedback for anything that navigates to a report detail (table rows,
+ * list cards, map popups). A quick scale-down on press makes the touch feel
+ * acknowledged while the next page loads — the perceived-speed trick
+ * humans read as "it goes well to the details".
+ */
+.tap-scale {
+  transition: transform 0.14s ease, background-color 0.14s ease,
+    box-shadow 0.14s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.tap-scale:active {
+  transform: scale(0.985);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tap-scale:active {
+    transform: none;
   }
 }
 

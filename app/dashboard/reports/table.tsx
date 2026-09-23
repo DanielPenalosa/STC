@@ -126,7 +126,7 @@ export default function ReportsTable({
                 <tr
                   key={r.id}
                   onClick={() => setActive(r)}
-                  className={`cursor-pointer transition-colors hover:bg-primary-50/40 ${
+                  className={`tap-scale cursor-pointer transition-colors hover:bg-primary-50/40 ${
                     active?.id === r.id ? "bg-primary-50/60" : ""
                   }`}
                 >
@@ -197,7 +197,7 @@ export default function ReportsTable({
                         setActive(r);
                       }}
                       onKeyDown={(e) => e.key === "Enter" && setActive(r)}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-300 transition hover:bg-primary-50 hover:text-primary-600"
+                      className="tap-scale inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-300 transition hover:bg-primary-50 hover:text-primary-600"
                     >
                       <Icon name="eye" size="sm" />
                     </span>
@@ -221,7 +221,7 @@ export default function ReportsTable({
             <button
               key={r.id}
               onClick={() => setActive(r)}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left"
+              className="tap-scale flex w-full items-center gap-3 px-4 py-3 text-left"
             >
               <div className="min-w-0 flex-1">
                 <p className="font-mono text-[11px] font-semibold text-primary-700">{r.ref_code}</p>
@@ -414,8 +414,8 @@ export default function ReportsTable({
               {/* actions */}
               <div className="flex gap-2 border-t border-slate-100 pt-4">
                 <Link
-                  href={`/reports/${active.id}`}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-700"
+                  href={`/dashboard/reports/${active.id}`}
+                  className="press flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-700"
                 >
                   <Icon name="edit" size="sm" />
                   Update Status

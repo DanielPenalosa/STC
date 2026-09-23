@@ -51,7 +51,7 @@ export default function ReportMap({
       });
       L.marker([p.lat, p.lng], { icon })
         .bindPopup(
-          `<a href="/reports/${p.id}" style="font-weight:600">${p.label}</a>`
+          `<a href="/dashboard/reports/${p.id}" style="font-weight:600">${p.label}</a>`
         )
         .addTo(layer);
     }

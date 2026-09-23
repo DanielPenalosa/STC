@@ -131,7 +131,7 @@ export default async function AiAnalysisPage() {
                         </span>
                       )}
                     </div>
-                    <Link href={`/reports/${row.report_id}`} className="mt-1 block font-semibold text-primary-700 hover:underline">
+                    <Link href={`/dashboard/reports/${row.report_id}`} className="mt-1 block font-semibold text-primary-700 hover:underline">
                       {row.reports?.title ?? "Report"}
                     </Link>
                     <p className="mt-1 text-sm text-slate-600">

@@ -109,7 +109,7 @@ export default function NotificationsPage() {
                   </p>
                   {n.report_id && (
                     <Link
-                      href={`/reports/${n.report_id}`}
+                      href={`/dashboard/reports/${n.report_id}`}
                       onClick={() => void open(n)}
                       className="mt-2 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-slate-700"
                     >

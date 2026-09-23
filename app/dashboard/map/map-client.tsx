@@ -295,7 +295,7 @@ export default function MapClient({
                 return (
                   <Link
                     key={r.id}
-                    href={`/reports/${r.id}`}
+                    href={`/dashboard/reports/${r.id}`}
                     onMouseEnter={() => locate(r)}
                     className="flex items-center gap-2.5 px-4 py-2.5 transition hover:bg-slate-50"
                   >
