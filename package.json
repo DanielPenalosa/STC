@@ -1,8 +1,8 @@
 {
-  "name": "smart-community-reporting",
+  "name": "scout-sta-cruz",
   "version": "0.1.0",
   "private": true,
-  "description": "Smart Community Reporting System — [CLIENT NAME] / [CITY/MUNICIPALITY]",
+  "description": "SCOUT — Sta. Cruz Community Observation and Unified Triage — AI-powered computer vision reporting and automated routing for Sta. Cruz, Laguna",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

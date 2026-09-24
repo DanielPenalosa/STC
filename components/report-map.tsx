@@ -27,7 +27,7 @@ export default function ReportMap({
     if (!ref.current) return;
     if (!mapRef.current) {
       const map = L.map(ref.current, { scrollWheelZoom: true }).setView(
-        [14.5995, 120.9842], // [CITY/MUNICIPALITY] center — adjust per client
+        [14.18284, 121.50758], // Santa Cruz, Laguna center
         12
       );
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {

@@ -1,8 +1,10 @@
 /**
- * [CLIENT NAME] — Smart Community Reporting System
- * [CITY/MUNICIPALITY]
+ * SCOUT — Sta. Cruz Community Observation and Unified Triage
+ * An AI-Powered Computer Vision-Based System for Location-Aware
+ * Classification and Automated Routing of Community Concerns
+ * in Sta. Cruz, Laguna
  *
- * Central place to rebrand the system when the real client is finalized.
+ * Central place to rebrand the system.
  * Change values here (or in the `app_settings` table / Settings page) and
  * the whole UI updates.
  *
@@ -11,10 +13,10 @@
  *   red #DF1B2C · yellow #F5E606 · green #2E8254 · off white #F9F9F9 · black #060606
  */
 
-export const CLIENT_NAME = "[CLIENT NAME]";
-export const CLIENT_SHORT_NAME = "[CLIENT NAME]";
-export const CITY_NAME = "[CITY/MUNICIPALITY]";
-export const TAGLINE = "Smart Community Reporting System";
+export const CLIENT_NAME = "SCOUT";
+export const CLIENT_SHORT_NAME = "SCOUT";
+export const CITY_NAME = "Sta. Cruz, Laguna";
+export const TAGLINE = "Sta. Cruz Community Observation and Unified Triage";
 export const CONTACT_EMAIL = "support@example.gov";
 export const CONTACT_PHONE = "(000) 000-0000";
 
@@ -31,7 +33,7 @@ export const PALETTE = {
 } as const;
 
 /**
- * [LOGO] — the official logo lives at /public/logo.png and is used everywhere.
+ * The SCOUT logo lives at /public/logo.png and is used everywhere.
  * Set `NEXT_PUBLIC_LOGO_URL` in .env.local to a hosted image to override it.
  */
 export const LOGO_URL =

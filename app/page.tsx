@@ -13,7 +13,7 @@ const FEATURES: { icon: IconName; title: string; text: string }[] = [
   {
     icon: "robot",
     title: "AI-assisted",
-    text: "Computer vision suggests the category, department and barangay for you.",
+    text: "Computer vision classifies your photo and routes the report to the right department or barangay automatically.",
   },
   {
     icon: "pin",
@@ -39,7 +39,7 @@ const FEATURES: { icon: IconName; title: string; text: string }[] = [
 
 const STEPS: { n: string; title: string; text: string }[] = [
   { n: "01", title: "Report", text: "Snap a photo of the issue — AI classifies it instantly." },
-  { n: "02", title: "Route", text: "Admins verify and assign it to the right office or barangay." },
+  { n: "02", title: "Route", text: `AI auto-assigns it to the right ${"office or barangay"} — no waiting on manual triage.` },
   { n: "03", title: "Resolve", text: "Track live status until the issue is marked resolved." },
 ];
 
@@ -52,7 +52,7 @@ const STATS: { value: string; label: string; icon: IconName }[] = [
 const FAQS: { q: string; a: string }[] = [
   {
     q: "Is it free to use?",
-    a: "Yes — creating an account and submitting reports is completely free for residents of the city or municipality.",
+    a: `Yes — creating an account and submitting reports is completely free for residents of ${CITY_NAME}.`,
   },
   {
     q: "What kinds of issues can I report?",
@@ -122,8 +122,8 @@ export default function Landing() {
               className="hero-rise inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary-100 bg-primary-50 px-3.5 py-1.5 text-xs font-semibold text-primary-700"
               style={{ animationDelay: "0.05s" }}
             >
-              <Icon name="pin" size="sm" className="shrink-0" />
-              <span className="truncate">{TAGLINE}</span>
+              <Icon name="robot" size="sm" className="shrink-0" />
+              <span className="truncate">AI-powered · Location-aware · Auto-routed</span>
             </span>
 
             <h1
@@ -141,9 +141,9 @@ export default function Landing() {
               className="hero-rise mx-auto mt-5 max-w-lg text-base leading-relaxed text-slate-600 lg:mx-0"
               style={{ animationDelay: "0.25s" }}
             >
-              Snap a photo and AI helps classify the issue — potholes, leaks,
-              broken streetlights and more — routing it to the right department
-              or barangay in {CITY_NAME}.
+              <span className="font-semibold text-slate-800">{CLIENT_NAME}</span> — {TAGLINE} —
+              classifies your photo with computer vision and routes it to the
+              right department or barangay in {CITY_NAME}, automatically.
             </p>
 
             <div

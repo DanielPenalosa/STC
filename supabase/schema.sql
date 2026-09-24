@@ -1,6 +1,6 @@
 -- =====================================================================
--- Smart Community Reporting System — Supabase schema
--- [CLIENT NAME] · [CITY/MUNICIPALITY]
+-- SCOUT — Sta. Cruz Community Observation and Unified Triage
+-- Supabase schema · Sta. Cruz, Laguna
 --
 -- Run once in the Supabase SQL editor. Idempotent: safe to re-run.
 --
@@ -238,10 +238,11 @@ create table if not exists public.app_settings (
 );
 
 insert into public.app_settings (key, value) values
-  ('client_name', '[CLIENT NAME]'),
-  ('city_name',   '[CITY/MUNICIPALITY]'),
-  ('tagline',     'Smart Community Reporting System')
-on conflict (key) do nothing;
+  ('client_name', 'SCOUT'),
+  ('city_name',   'Sta. Cruz, Laguna'),
+  ('tagline',     'Sta. Cruz Community Observation and Unified Triage')
+on conflict (key) do update set value = excluded.value
+  where public.app_settings.value like '[%]';
 
 -- =====================================================================
 -- 2. HELPERS

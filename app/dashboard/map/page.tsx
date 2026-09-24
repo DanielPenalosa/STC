@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/data";
 import { PageHeader } from "@/components/ui";
+import { CITY_NAME } from "@/app/brand";
 import { publicPhotoUrl } from "@/lib/photo";
 import { scopeFor, applyScope } from "@/lib/scope";
 import MapClient, { type MapReport } from "./map-client";
@@ -60,8 +61,8 @@ export default async function MapPage() {
         title="Report Map"
         subtitle={
           scope.isStaff
-            ? `Reports assigned to your ${scope.role} — plotted across [CITY/MUNICIPALITY]`
-            : "Explore report locations across [CITY/MUNICIPALITY]"
+            ? `Reports assigned to your ${scope.role} — plotted across ${CITY_NAME}`
+            : `Explore report locations across ${CITY_NAME}`
         }
       />
       <MapClient

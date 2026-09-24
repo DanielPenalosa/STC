@@ -1,7 +1,7 @@
 {
-  "name": "[CLIENT NAME] — Smart Community Reporting",
-  "short_name": "[CLIENT NAME]",
-  "description": "Report community issues in [CITY/MUNICIPALITY] — potholes, leaks, broken streetlights and more. Track them to resolution.",
+  "name": "SCOUT — Sta. Cruz Community Observation and Unified Triage",
+  "short_name": "SCOUT",
+  "description": "Report community issues in Sta. Cruz, Laguna — snap a photo, AI classifies it and routes it to the right department or barangay automatically. Track it to resolution.",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",

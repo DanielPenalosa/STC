@@ -1,13 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { CLIENT_NAME, TAGLINE } from "./brand";
+import { CLIENT_NAME, CLIENT_SHORT_NAME, CITY_NAME, TAGLINE } from "./brand";
 
 export const metadata: Metadata = {
   title: {
-    default: `${TAGLINE} — ${CLIENT_NAME}`,
-    template: `%s · ${TAGLINE}`,
+    default: `${CLIENT_NAME} — ${TAGLINE}`,
+    template: `%s · ${CLIENT_SHORT_NAME}`,
   },
-  description: `AI-assisted community issue reporting for ${CLIENT_NAME} — ${"[CITY/MUNICIPALITY]"}.`,
+  description: `SCOUT — AI-powered community issue reporting for ${CITY_NAME}. Snap a photo, AI classifies it and routes it to the right department or barangay automatically.`,
   manifest: "/manifest.json",
   icons: {
     icon: [{ url: "/logo.png", type: "image/png" }],
