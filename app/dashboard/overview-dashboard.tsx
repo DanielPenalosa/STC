@@ -159,6 +159,22 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
     : users.filter((u) => u.is_active).length;
   const pendingAccounts = users.filter((u) => u.role === "citizen" && u.verification_status === "pending").length;
 
+  /* ----- staff KPIs (unit-scoped, operational — no system-admin stats) ----- */
+  const statusOn = (k: string, s: ReportStatus) =>
+    reports.filter((r) => r.status === s && dayKey(new Date(r.created_at).getTime()) === k).length;
+  const resolvedOn = (k: string) =>
+    reports.filter((r) => r.resolved_at && dayKey(new Date(r.resolved_at).getTime()) === k).length;
+  const staffAssigned = reports.filter((r) => r.status === "assigned").length;
+  const staffInProgress = reports.filter((r) => r.status === "in_progress").length;
+  const staffResolved = reports.filter((r) => r.status === "resolved" || r.status === "closed").length;
+  const urgentOpen = reports.filter(
+    (r) => !["resolved", "closed", "rejected"].includes(r.status) && (r.priority ?? 1) >= 4
+  ).length;
+  const resolvedTrend = pct(
+    last7.reduce((a, k) => a + resolvedOn(k), 0),
+    prev7.reduce((a, k) => a + resolvedOn(k), 0)
+  );
+
   /* ----- quick actions ----- */
   const actions: { icon: IconName; title: string; desc: string; href: string }[] =
     scope.isStaff
@@ -242,6 +258,90 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
 
       {/* ---------- KPI cards ---------- */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {scope.isStaff ? (
+          <>
+            {/* staff KPIs — operational and unit-scoped, no system-admin stats */}
+            <Card className="p-4 transition hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
+                    <Icon name="file" size="md" />
+                  </span>
+                  <div>
+                    <p className="text-xs text-slate-400">Total Reports</p>
+                    <p className="text-xl font-extrabold text-slate-900">{totalReports}</p>
+                  </div>
+                </div>
+                <Sparkline values={[...prev7.map(reportsOn), ...last7.map(reportsOn)]} stroke="#0a5ef5" fill="#eef6ff" />
+              </div>
+              <p className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+                {urgentOpen > 0 ? (
+                  <>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-warn-100 px-2 py-0.5 font-semibold text-warn-700">
+                      <Icon name="alert" size="sm" />
+                      {urgentOpen} urgent
+                    </span>
+                    <span className="text-slate-400">in your queue</span>
+                  </>
+                ) : (
+                  <span className="text-slate-400">handled by your {profile.role}</span>
+                )}
+              </p>
+            </Card>
+
+            <Card className="p-4 transition hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-50 text-accent-600">
+                    <Icon name="inbox" size="md" />
+                  </span>
+                  <div>
+                    <p className="text-xs text-slate-400">Newly Assigned</p>
+                    <p className="text-xl font-extrabold text-slate-900">{staffAssigned}</p>
+                  </div>
+                </div>
+                <Sparkline values={[...prev7.map((k) => statusOn(k, "assigned")), ...last7.map((k) => statusOn(k, "assigned"))]} stroke="#06ABEA" fill="#e6f7fe" />
+              </div>
+              <p className="mt-1.5 text-[11px] text-slate-400">waiting to be accepted</p>
+            </Card>
+
+            <Card className="p-4 transition hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-warn-50 text-warn-600">
+                    <Icon name="wrench" size="md" />
+                  </span>
+                  <div>
+                    <p className="text-xs text-slate-400">In Progress</p>
+                    <p className="text-xl font-extrabold text-slate-900">{staffInProgress}</p>
+                  </div>
+                </div>
+                <Sparkline values={[...prev7.map((k) => statusOn(k, "in_progress")), ...last7.map((k) => statusOn(k, "in_progress"))]} stroke="#d97706" fill="#fef3c7" />
+              </div>
+              <p className="mt-1.5 text-[11px] text-slate-400">being worked on now</p>
+            </Card>
+
+            <Card className="p-4 transition hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-success-50 text-success-600">
+                    <Icon name="check-circle" size="md" />
+                  </span>
+                  <div>
+                    <p className="text-xs text-slate-400">Resolved</p>
+                    <p className="text-xl font-extrabold text-slate-900">{staffResolved}</p>
+                  </div>
+                </div>
+                <Sparkline values={[...prev7.map(resolvedOn), ...last7.map(resolvedOn)]} stroke="#2E8254" fill="#e7f4ec" />
+              </div>
+              <p className={`mt-1.5 flex items-center gap-1 text-[11px] ${resolvedTrend >= 0 ? "text-success-600" : "text-danger-500"}`}>
+                <Icon name={resolvedTrend >= 0 ? "trend-up" : "trend-down"} size="sm" />
+                {resolvedTrend >= 0 ? "+" : ""}{resolvedTrend}% <span className="text-slate-400">vs prior 7 days</span>
+              </p>
+            </Card>
+          </>
+        ) : (
+          <>
         <Card className="p-4 transition hover:shadow-md">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
@@ -315,6 +415,8 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
             {pendingTrend >= 0 ? "+" : ""}{pendingTrend}% <span className="text-slate-400">registration pace</span>
           </p>
         </Card>
+          </>
+        )}
       </div>
 
       {/* ---------- overview chart + donut ---------- */}
