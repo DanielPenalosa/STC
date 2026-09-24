@@ -142,10 +142,15 @@ export default function UserManager({
     setBusy(true);
     setError(null);
     setCreateSuccess(null);
-    const fd = new FormData(e.currentTarget);
+    // capture BEFORE awaiting: React nulls e.currentTarget after the
+    // synchronous handler returns, so touching it past `await` throws
+    // "Cannot read properties of null (reading 'reset')"
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const fullName = String(fd.get("full_name") ?? "");
     const role = createRole;
     const res = await createStaffAccount({
-      fullName: String(fd.get("full_name") ?? ""),
+      fullName,
       email: String(fd.get("email") ?? ""),
       password: String(fd.get("password") ?? ""),
       phone: String(fd.get("phone") ?? ""),
@@ -158,11 +163,11 @@ export default function UserManager({
       setError(res.error ?? "Failed to create account");
       return;
     }
-    setCreateSuccess(`${String(fd.get("full_name"))} can now sign in with the email & password you set.`);
+    setCreateSuccess(`${fullName} can now sign in with the email & password you set.`);
     setShowCreate(false);
     setCreateStep(0);
     setCreateRole(null);
-    e.currentTarget.reset();
+    form.reset();
     router.refresh();
   }
 

@@ -45,6 +45,10 @@ export default async function ReportDetailPage({
   const supabase = await createClient();
   const isStaff = profile.role !== "citizen";
 
+  // guarantee the official barangay list exists before reading it
+  const { ensureOfficialBarangays } = await import("@/lib/barangays-official");
+  await ensureOfficialBarangays();
+
   const { data } = await supabase
     .from("reports")
     .select(

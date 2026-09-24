@@ -29,6 +29,17 @@ function namesMatch(a: string, b: string): boolean {
 }
 
 /**
+ * OSM labels the five town-proper barangays "Barangay I"–"V", while the
+ * official Sta. Cruz roster (and our seeded rows) calls them
+ * "Poblacion I"–"V". Canonicalize the geocoder's name so both spellings
+ * resolve to the same barangay row instead of auto-creating duplicates.
+ */
+function canonicalizeDetectedName(name: string): string {
+  const m = name.match(/^barangay\s+(i|ii|iii|iv|v)$/i);
+  return m ? `Poblacion ${m[1].toUpperCase()}` : name;
+}
+
+/**
  * Barangay resolution, shared by /api/detect-barangay and createReport so
  * the client preview and the server-side routing always agree.
  *
@@ -49,6 +60,11 @@ export async function resolveBarangay(
   lat: number,
   lng: number
 ): Promise<BarangayResolution> {
+  // guarantee the official roster exists so GPS matching always has the
+  // full Sta. Cruz list to work with (no-op after the first call)
+  const { ensureOfficialBarangays } = await import("./barangays-official");
+  await ensureOfficialBarangays();
+
   const { data: brgyData } = await client
     .from("barangays")
     .select("*")
@@ -57,7 +73,9 @@ export async function resolveBarangay(
 
   /* pass 1 — reverse geocode: real barangay boundaries */
   const place = await reverseGeocode(lat, lng);
-  const detectedName = place?.barangayName ?? null;
+  const detectedName = place?.barangayName
+    ? canonicalizeDetectedName(place.barangayName)
+    : null;
 
   if (detectedName) {
     const existing = barangays.find((b) => namesMatch(b.name, detectedName));

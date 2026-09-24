@@ -175,14 +175,14 @@ export const URGENCY_KEYWORDS: {
   words: string[];
   level: "high" | "critical";
 }[] = [
-  { words: ["live wire", "sparking", "electrocution", "electrocuted"], level: "critical" },
-  { words: ["open manhole", "sinkhole", "collapse", "collapsed"], level: "critical" },
-  { words: ["fire", "burning", "smoke"], level: "critical" },
-  { words: ["deep", "huge", "massive", "dangerous", "child", "accident", "hit"], level: "high" },
-  { words: ["flood", "raging", "rising", "overflowing", "rushing"], level: "high" },
-  { words: ["sewage", "septic", "contaminated", "dengue", "mosquito"], level: "high" },
-  { words: ["night", "dark", "unlit", "cannot see"], level: "high" },
-  { words: ["blocked", "cannot pass", "trapped", "stranded"], level: "high" },
+  { words: ["live wire", "sparking", "electrocution", "electrocuted", "kuryente", "nasasadlak na kable", "nakakalat na kable"], level: "critical" },
+  { words: ["open manhole", "bukas na manhole", "sinkhole", "collapse", "collapsed", "gumuhu"], level: "critical" },
+  { words: ["fire", "burning", "smoke", "sunog", "nagasasa"], level: "critical" },
+  { words: ["deep", "huge", "massive", "dangerous", "child", "accident", "hit", "nabangga", "naaksidente", "malalim", "malaki"], level: "high" },
+  { words: ["flood", "raging", "rising", "overflowing", "rushing", "baha", "lumalaki", "taas ng tubig", "umaapaw"], level: "high" },
+  { words: ["sewage", "septic", "contaminated", "dengue", "mosquito", "septik", "dumi", "amoy kanal", "lamok"], level: "high" },
+  { words: ["night", "dark", "unlit", "cannot see", "gabi", "madilim", "walang ilaw"], level: "high" },
+  { words: ["blocked", "cannot pass", "trapped", "stranded", "harang", "hindi makadaan", "naipit", "nastranded"], level: "high" },
 ];
 
 /** Department-routing keywords (used for municipal-level reports). */

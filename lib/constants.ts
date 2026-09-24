@@ -82,7 +82,11 @@ export const PRIORITY_COLORS: Record<Priority, string> = {
   5: "bg-danger-600 text-white",
 };
 
-/** Follower-count thresholds that auto-boost a report's priority. */
+/**
+ * Follower-count display thresholds — FOLLOWERS NO LONGER AFFECT PRIORITY.
+ * Priority is set by the AI from the photo analysis (urgency_priority);
+ * kept only for showing "trending"-style engagement on the report page.
+ */
 export const PRIORITY_THRESHOLDS: { min: number; priority: Priority }[] = [
   { min: 20, priority: 5 },
   { min: 10, priority: 4 },

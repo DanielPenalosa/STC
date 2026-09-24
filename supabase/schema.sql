@@ -101,6 +101,10 @@ create table if not exists public.reports (
   status        text not null default 'submitted'
                   check (status in ('submitted','under_review','verified','assigned','in_progress','resolved','closed')),
   priority      text not null default 'medium' check (priority in ('low','medium','high')),
+  -- AI urgency leveling (added 2026-09-24): smallint 2–5 mirroring the
+  -- AI urgency leveling (added 2026-09-24): smallint 2–5 mirroring the
+  -- urgency level; reports.priority = urgency_priority (1 when no verdict)
+  urgency_priority smallint,
   is_anonymous  boolean not null default false,
   barangay_id   uuid references public.barangays(id),
   department_id uuid references public.departments(id),
@@ -537,8 +541,10 @@ begin
     coalesce(new.raw_user_meta_data->>'full_name', new.email),
     nullif(new.raw_user_meta_data->>'phone', ''),
     v_role,
-    (new.raw_user_meta_data->>'department_id')::uuid,
-    (new.raw_user_meta_data->>'barangay_id')::uuid
+    -- nullif is essential: admin-created staff accounts carry "" for the
+    -- id that doesn't apply, and ''::uuid throws (breaking account creation)
+    nullif(new.raw_user_meta_data->>'department_id', '')::uuid,
+    nullif(new.raw_user_meta_data->>'barangay_id', '')::uuid
   )
   on conflict (id) do nothing;
   return new;
@@ -709,26 +715,37 @@ insert into public.departments (name, slug, description, color) values
   ('[DEPARTMENT] Public Safety Office',    'public-safety',    'Safety, hazards and emergency response', '#DF1B2C')
 on conflict (slug) do nothing;
 
-insert into public.barangays (name) values
-  ('[BARANGAY 1]'), ('[BARANGAY 2]'), ('[BARANGAY 3]'),
-  ('[BARANGAY 4]'), ('[BARANGAY 5]')
+-- The 26 official barangays of Sta. Cruz, Laguna with OpenStreetMap
+-- boundary-centroid coordinates (so GPS detection works out of the box).
+-- Admins can fine-tune centers in Admin → Barangays.
+insert into public.barangays (name, description, center_lat, center_lng, is_active) values
+  ('Alipit',             'Official barangay of Sta. Cruz, Laguna', 14.2239907, 121.4051150, true),
+  ('Bagumbayan',         'Official barangay of Sta. Cruz, Laguna', 14.2686089, 121.3985825, true),
+  ('Bubukal',            'Official barangay of Sta. Cruz, Laguna', 14.2566665, 121.3992795, true),
+  ('Calios',             'Official barangay of Sta. Cruz, Laguna', 14.2747526, 121.4048705, true),
+  ('Duhat',              'Official barangay of Sta. Cruz, Laguna', 14.2532985, 121.3827166, true),
+  ('Gatid',              'Official barangay of Sta. Cruz, Laguna', 14.2604341, 121.3835914, true),
+  ('Jasaan',             'Official barangay of Sta. Cruz, Laguna', 14.2236530, 121.3946862, true),
+  ('Labuin',             'Official barangay of Sta. Cruz, Laguna', 14.2503574, 121.4007365, true),
+  ('Malinao',            'Official barangay of Sta. Cruz, Laguna', 14.2328929, 121.3968810, true),
+  ('Oogong',             'Official barangay of Sta. Cruz, Laguna', 14.2263504, 121.4004829, true),
+  ('Pagsawitan',         'Official barangay of Sta. Cruz, Laguna', 14.2657906, 121.4265403, true),
+  ('Palasan',            'Official barangay of Sta. Cruz, Laguna', 14.2575625, 121.4189780, true),
+  ('Patimbao',           'Official barangay of Sta. Cruz, Laguna', 14.2701853, 121.4182901, true),
+  ('Poblacion I',        'Official barangay of Sta. Cruz, Laguna', 14.2771152, 121.4178920, true),
+  ('Poblacion II',       'Official barangay of Sta. Cruz, Laguna', 14.2798998, 121.4163868, true),
+  ('Poblacion III',      'Official barangay of Sta. Cruz, Laguna', 14.2824529, 121.4151018, true),
+  ('Poblacion IV',       'Official barangay of Sta. Cruz, Laguna', 14.2850061, 121.4151012, true),
+  ('Poblacion V',        'Official barangay of Sta. Cruz, Laguna', 14.2857996, 121.4128725, true),
+  ('San Jose',           'Official barangay of Sta. Cruz, Laguna', 14.2373329, 121.4037511, true),
+  ('San Juan',           'Official barangay of Sta. Cruz, Laguna', 14.2438713, 121.4069612, true),
+  ('San Pablo Norte',    'Official barangay of Sta. Cruz, Laguna', 14.2903531, 121.4130607, true),
+  ('San Pablo Sur',      'Official barangay of Sta. Cruz, Laguna', 14.2828568, 121.4169772, true),
+  ('Santisima Cruz',     'Official barangay of Sta. Cruz, Laguna', 14.2907196, 121.4093518, true),
+  ('Santo Angel Central','Official barangay of Sta. Cruz, Laguna', 14.2852811, 121.4089991, true),
+  ('Santo Angel Norte',  'Official barangay of Sta. Cruz, Laguna', 14.2884953, 121.4062354, true),
+  ('Santo Angel Sur',    'Official barangay of Sta. Cruz, Laguna', 14.2824262, 121.4108895, true)
 on conflict (name) do nothing;
-
--- Seed barangay centers so GPS detection works out of the box.
--- ADMIN ACTION after go-live: set the real lat/lng of every barangay in
--- Admin → Barangays (Center latitude / Center longitude), then delete this
--- block's rows or simply update them.
-update public.barangays b
-set center_lat = s.center_lat,
-    center_lng = s.center_lng
-from (
-  select name,
-         14.428 + (row_number() over (order by name)) * 0.004 as center_lat,
-        121.410 + (row_number() over (order by name)) * 0.004 as center_lng
-  from public.barangays
-  where center_lat is null and name like '[BARANGAY%'
-) s
-where b.name = s.name;
 
 -- =====================================================================
 -- Done. Sign up the first user, then promote them:

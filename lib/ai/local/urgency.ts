@@ -9,6 +9,15 @@
  */
 import { URGENCY_KEYWORDS, type IssueLabel } from "./labels";
 
+/**
+ * A confident CLIP verdict moves the score toward the level band's top;
+ * a shaky one keeps the report out of the next band up.
+ */
+function bandTarget(level: UrgencyLevel, confidence: number): number {
+  const [lo, hi] = BANDS[level];
+  return lo + (hi - lo) * (0.55 + 0.4 * Math.max(0, Math.min(1, confidence)));
+}
+
 export type UrgencyLevel = "low" | "medium" | "high" | "critical";
 
 export type UrgencyResult = {
@@ -37,9 +46,12 @@ export function urgencyFromScore(score: number): UrgencyLevel {
 
 export function scoreUrgency(input: {
   issue: IssueLabel | null;
+  /** 0–1 confidence of the winning CLIP verdict (default 0.5 — neutral) */
+  confidence?: number;
   title: string;
   description: string;
 }): UrgencyResult {
+  const confidence = input.confidence ?? 0.5;
   let score = 0.18; // baseline — a filed report is worth someone's attention
   const reasons: string[] = [];
 
@@ -74,8 +86,23 @@ export function scoreUrgency(input: {
       else if (worst !== "critical") worst = "high";
     }
   }
-  if (worst === "critical") score = Math.max(score, 0.82);
-  else if (worst === "high") score = Math.max(score, 0.58);
+  if (worst === "critical") score = Math.max(score, bandTarget("critical", confidence));
+  else if (worst === "high") score = Math.max(score, bandTarget("high", confidence));
+
+  // 3. confidence-sensitive banding — the same issue type lands higher when
+  //    the model is sure, lower when it is guessing, so a confident verdict
+  //    rises to the top of its band while a shaky one stays at the bottom.
+  if (input.issue && confidence >= 0.75) {
+    const s = input.issue.signals;
+    const base: UrgencyLevel = s.safety
+      ? "high"
+      : s.health || s.utility
+        ? "medium"
+        : s.disruption
+          ? "medium"
+          : "low";
+    if (base !== "low") score = Math.max(score, bandTarget(base, confidence));
+  }
 
   score = Math.min(1, Math.max(0, score));
   const level = urgencyFromScore(score);

@@ -45,7 +45,10 @@ export async function createStaffAccount(input: {
   }
 
   // 1. create the auth user (service role bypasses email confirmation);
-  //    the on_auth_user_created trigger reads role/department/barangay from metadata
+  //    the on_auth_user_created trigger reads role/department/barangay from
+  //    metadata. Ids are omitted entirely when unset — an empty string would
+  //    have made the trigger's ::uuid cast throw ("Database error creating
+  //    new user")
   const { data, error } = await admin.auth.admin.createUser({
     email: input.email,
     password: input.password,
@@ -54,8 +57,8 @@ export async function createStaffAccount(input: {
       full_name: input.fullName,
       phone: input.phone ?? "",
       role: input.role,
-      department_id: input.departmentId ?? "",
-      barangay_id: input.barangayId ?? "",
+      ...(input.departmentId ? { department_id: input.departmentId } : {}),
+      ...(input.barangayId ? { barangay_id: input.barangayId } : {}),
     },
   });
   if (error) return { ok: false, error: error.message };

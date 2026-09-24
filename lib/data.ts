@@ -37,6 +37,12 @@ export async function getCategories(): Promise<Category[]> {
 
 export async function getBarangays(): Promise<Barangay[]> {
   const supabase = await createSb();
+
+  // self-seed the official 26 Sta. Cruz barangays so every dropdown
+  // defaults to the full list — even before the SQL migration is run
+  const { ensureOfficialBarangays } = await import("./barangays-official");
+  await ensureOfficialBarangays();
+
   const { data } = await supabase
     .from("barangays")
     .select("*")

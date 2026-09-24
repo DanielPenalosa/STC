@@ -218,6 +218,7 @@ export function decideFromClipScores(input: VerdictInput): VerdictResult {
 
   const urgency = scoreUrgency({
     issue: primary,
+    confidence: clipConfidence,
     title: input.title ?? "",
     description: input.description ?? "",
   });

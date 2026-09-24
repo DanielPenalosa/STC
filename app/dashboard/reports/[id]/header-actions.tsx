@@ -118,7 +118,7 @@ export default function HeaderActions({
         </p>
       )}
 
-      {/* — Priority (after verification; auto-boosted by followers, admin may tune) — */}
+      {/* — Priority (set by the AI from the photo analysis; admin may tune) — */}
       {canAssign && (
       <Menu label="Priority" icon="alert" tone="secondary">
         {(close) => (

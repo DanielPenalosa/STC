@@ -41,6 +41,10 @@ export default async function AdminReportsPage({
   const profile = await requireProfile();
   const scope = scopeFor(profile);
 
+  // guarantee the official barangay list exists before reading it
+  const { ensureOfficialBarangays } = await import("@/lib/barangays-official");
+  await ensureOfficialBarangays();
+
   let query = applyScope(
     supabase
       .from("reports")

@@ -364,10 +364,20 @@ export async function runLocalAnalysisForReport(
         // reads these columns to display "Assigned to X" — and bump the
         // status with the same guard as before: never override an earlier
         // human decision
-        const routedPatch: Record<string, string> = {};
+        const routedPatch: Record<string, string | number> = {};
         if (isBarangay) routedPatch.barangay_id = target.id;
         else routedPatch.department_id = target.id;
         routedPatch.status = "assigned";
+        // level the report from the AI urgency verdict — the photo decides
+        // the priority, nothing else (follower boosts were removed)
+        routedPatch.urgency_priority =
+          result.urgency?.level === "critical"
+            ? 5
+            : result.urgency?.level === "high"
+              ? 4
+              : result.urgency?.level === "medium"
+                ? 3
+                : 2;
         await admin
           .from("reports")
           .update(routedPatch)

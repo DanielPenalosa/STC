@@ -9,7 +9,13 @@ import type { Barangay } from "@/lib/types";
  * within `MAX_DISTANCE_KM` wins; `null` means "outside known barangays".
  */
 
-export const MAX_DISTANCE_KM = 10;
+/**
+ * Nearest-center fallback radius. Santa Cruz is only ~38.6 km² (max internal
+ * center distance ≈ 3 km) and the nearest neighboring town (Pagsanjan) sits
+ * just 4.6 km away — a wide radius would mis-assign out-of-town GPS fixes to
+ * a Sta. Cruz barangay. 5 km covers the whole municipality with margin.
+ */
+export const MAX_DISTANCE_KM = 5;
 
 const EARTH_RADIUS_KM = 6371;
 

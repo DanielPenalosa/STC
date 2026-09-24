@@ -11,6 +11,10 @@ import type { Report } from "@/lib/types";
 export default async function MapPage() {
   const supabase = await createClient();
   const profile = await requireProfile();
+
+  // guarantee the official barangay list exists before reading it
+  const { ensureOfficialBarangays } = await import("@/lib/barangays-official");
+  await ensureOfficialBarangays();
   const scope = scopeFor(profile);
 
   const [reportsRes, catsRes, brgysRes] = await Promise.all([

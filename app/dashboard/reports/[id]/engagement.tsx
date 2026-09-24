@@ -15,7 +15,7 @@ import { btn, inputCls } from "@/components/ui";
 import { Icon } from "@/components/icons";
 
 /* ------------------------------------------------------------------ */
-/* Follow / Unfollow — other citizens boost a report's priority        */
+/* Follow / Unfollow — other citizens follow along for updates         */
 /* ------------------------------------------------------------------ */
 
 export function FollowButton({
@@ -54,7 +54,7 @@ export function FollowButton({
           ? "You authored this report — you're automatically following it"
           : following
           ? "Unfollow this report"
-          : "Follow to get notified and boost its priority"
+          : "Follow to get updates on this report"
       }
       className={`press inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold shadow-sm transition ${
         following
