@@ -35,6 +35,14 @@ function pct(cur: number, prev: number): number {
   return Math.round(((cur - prev) / prev) * 100);
 }
 
+/** Human duration for an average-resolution-time in hours. */
+function fmtHours(h: number | null): string {
+  if (h == null) return "—";
+  if (h < 1) return `${Math.max(1, Math.round(h * 60))}m`;
+  if (h < 48) return `${Math.round(h)}h`;
+  return `${(h / 24).toFixed(1)} days`;
+}
+
 /** Smooth area sparkline for the stat cards. */
 function Sparkline({ values, stroke, fill }: { values: number[]; stroke: string; fill: string }) {
   const w = 100, h = 30, max = Math.max(...values, 1);
@@ -174,6 +182,29 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
     last7.reduce((a, k) => a + resolvedOn(k), 0),
     prev7.reduce((a, k) => a + resolvedOn(k), 0)
   );
+
+  /* ----- weekly performance (staff): resolved count + avg resolution time ----- */
+  const inDayWindow = (t: string | null | undefined, keys: string[]) =>
+    !!t && keys.includes(dayKey(new Date(t).getTime()));
+  const weekResolvedRows = reports.filter((r) => inDayWindow(r.resolved_at, last7));
+  const prevResolvedRows = reports.filter((r) => inDayWindow(r.resolved_at, prev7));
+  const avgResolutionOf = (rows: typeof reports): number | null => {
+    const hrs = rows
+      .map((r) =>
+        r.resolved_at
+          ? (new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime()) / 3_600_000
+          : NaN
+      )
+      .filter((h) => Number.isFinite(h) && h >= 0);
+    return hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null;
+  };
+  const avgResolution = avgResolutionOf(weekResolvedRows);
+  const prevAvgResolution = avgResolutionOf(prevResolvedRows);
+  const avgResolutionDelta =
+    avgResolution != null && prevAvgResolution != null ? avgResolution - prevAvgResolution : null;
+  const perDayResolved = last7.map(resolvedOn);
+  const peakResolved = Math.max(...perDayResolved, 0);
+  const peakDayIdx = perDayResolved.indexOf(peakResolved);
 
   /* ----- quick actions ----- */
   const actions: { icon: IconName; title: string; desc: string; href: string }[] =
@@ -418,6 +449,81 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
           </>
         )}
       </div>
+
+      {/* ---------- weekly performance (staff only) ---------- */}
+      {scope.isStaff && (
+        <Card className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-success-50 text-success-600">
+                <Icon name="trend-up" size="md" />
+              </span>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Weekly performance</p>
+                <p className="text-[11px] text-slate-400">Reports your unit resolved over the last 7 days</p>
+              </div>
+            </div>
+            <span className="rounded-full border border-slate-200 px-3 py-1 text-[11px] font-semibold text-slate-500">
+              Last 7 days
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {/* resolved count */}
+            <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3.5">
+              <p className="text-xs text-slate-400">Resolved this week</p>
+              <div className="mt-1 flex items-end gap-2">
+                <p className="text-2xl font-extrabold leading-none text-slate-900">{weekResolvedRows.length}</p>
+                <p className={`flex items-center gap-0.5 text-[11px] font-semibold ${resolvedTrend >= 0 ? "text-success-600" : "text-danger-500"}`}>
+                  <Icon name={resolvedTrend >= 0 ? "trend-up" : "trend-down"} size="sm" />
+                  {resolvedTrend >= 0 ? "+" : ""}{resolvedTrend}%
+                </p>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">vs {prevResolvedRows.length} the prior week</p>
+            </div>
+
+            {/* average resolution time */}
+            <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3.5">
+              <p className="text-xs text-slate-400">Avg. resolution time</p>
+              <div className="mt-1 flex items-end gap-2">
+                <p className="text-2xl font-extrabold leading-none text-slate-900">{fmtHours(avgResolution)}</p>
+                {avgResolutionDelta != null && (
+                  <p
+                    className={`flex items-center gap-0.5 text-[11px] font-semibold ${
+                      avgResolutionDelta <= 0 ? "text-success-600" : "text-warn-600"
+                    }`}
+                  >
+                    <Icon name={avgResolutionDelta <= 0 ? "trend-down" : "trend-up"} size="sm" />
+                    {fmtHours(Math.abs(avgResolutionDelta))}
+                  </p>
+                )}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">from submission to resolved · lower is better</p>
+            </div>
+          </div>
+
+          {/* 7-day mini bars */}
+          <div className="mt-4 flex items-end justify-between gap-1.5">
+            {last7.map((k, i) => {
+              const v = perDayResolved[i];
+              const h = peakResolved > 0 ? Math.max(6, Math.round((v / peakResolved) * 44)) : 6;
+              return (
+                <div key={k} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+                  <span className="text-[10px] font-semibold text-slate-500">{v > 0 ? v : ""}</span>
+                  <span
+                    className={`w-full max-w-8 rounded-t-md ${
+                      i === peakDayIdx && v > 0 ? "bg-success-500" : v > 0 ? "bg-success-300" : "bg-slate-100"
+                    }`}
+                    style={{ height: `${h}px` }}
+                    aria-hidden
+                  />
+                  <span className="text-[10px] text-slate-400">{dayLabel(k)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* ---------- overview chart + donut ---------- */}
       <div className="grid gap-4 lg:grid-cols-5">
