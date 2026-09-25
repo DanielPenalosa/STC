@@ -111,9 +111,16 @@ export async function saveIdPhotoPath(path: string): Promise<ActionResult> {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return { ok: false, error: "Not signed in." };
 
-  // only accept paths inside the caller's own folder
-  if (!path.startsWith(`${auth.user.id}/`))
+  // only accept paths that point at the caller's own ID, in either storage
+  // layout: Cloudinary returns "cld:stc/ids/<uid>/...", Supabase Storage
+  // returns "<uid>/..." (the upload route /api/upload-id enforces the same
+  // ownership rule before any write, this is the second gate)
+  const uid = auth.user.id;
+  const ownsCloudinary = path.startsWith(`cld:stc/ids/${uid}/`);
+  const ownsSupabase = path.startsWith(`${uid}/`);
+  if (!ownsCloudinary && !ownsSupabase) {
     return { ok: false, error: "Invalid ID photo path." };
+  }
 
   const admin = createAdminClient();
   const { error } = await admin

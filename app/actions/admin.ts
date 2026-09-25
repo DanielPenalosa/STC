@@ -457,6 +457,15 @@ export async function getIdPhotoUrl(
   path: string
 ): Promise<{ ok: boolean; url?: string; error?: string }> {
   await requireAdmin();
+
+  // Cloudinary-stored IDs are private "authenticated" assets — sign a
+  // short-lived CDN URL instead of asking Supabase Storage (which would
+  // fail with "No URL" for cld: paths)
+  if (path.startsWith("cld:")) {
+    const { cloudinarySignedUrl } = await import("@/lib/storage/cloudinary");
+    return { ok: true, url: cloudinarySignedUrl(path.slice(4), 1600) };
+  }
+
   const supabase = await createClient();
   const { data, error } = await supabase.storage
     .from("verification-ids")
