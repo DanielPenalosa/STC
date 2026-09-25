@@ -3,6 +3,12 @@ import { Logo, CLIENT_NAME, CITY_NAME, TAGLINE } from "./brand";
 import { Icon, type IconName } from "@/components/icons";
 import { Reveal } from "@/components/reveal";
 import HeroShowcase from "./hero-showcase";
+import { getResolvedReports } from "@/lib/transparency";
+import { publicPhotoUrl } from "@/lib/photo";
+
+// The transparency feed must reflect the database live — never prerender a
+// static snapshot of resolved reports.
+export const dynamic = "force-dynamic";
 
 const FEATURES: { icon: IconName; title: string; text: string }[] = [
   {
@@ -68,7 +74,10 @@ const FAQS: { q: string; a: string }[] = [
   },
 ];
 
-export default function Landing() {
+export default async function Landing() {
+  // Resolved reports for the public transparency feed — empty-safe: the
+  // section renders nothing when there's nothing resolved yet.
+  const { items: resolved } = await getResolvedReports(6);
   return (
     <main className="landing-fade flex min-h-screen flex-col bg-surface">
       {/* ================= header — navy like the admin shell ================= */}
@@ -85,6 +94,7 @@ export default function Landing() {
           <nav className="hidden items-center gap-7 text-sm font-medium text-primary-100 md:flex">
             <a href="#how" className="transition hover:text-white">How it works</a>
             <a href="#features" className="transition hover:text-white">Features</a>
+            <a href="#resolved" className="transition hover:text-white">Resolved</a>
             <a href="#faq" className="transition hover:text-white">FAQ</a>
           </nav>
 
@@ -244,6 +254,75 @@ export default function Landing() {
         </section>
       </Reveal>
 
+      {/* ================= resolved feed (public transparency) ================= */}
+      {resolved.length > 0 && (
+        <Reveal>
+          <section id="resolved" className="border-y border-slate-200/70 bg-white px-5 py-16 sm:py-20">
+            <div className="mx-auto max-w-6xl">
+              <p className="reveal text-center text-[11px] font-bold uppercase tracking-[0.2em] text-success-600">
+                Transparency feed
+              </p>
+              <h2 className="reveal mx-auto mt-2 max-w-lg text-center text-2xl font-extrabold text-slate-900 sm:text-3xl">
+                Recent resolved reports
+              </h2>
+              <p className="reveal mx-auto mt-3 max-w-xl text-center text-sm leading-relaxed text-slate-500">
+                Real issues reported by your neighbors — fixed and verified. Photos are
+                shown for resolved reports only; no citizen information is ever shown.
+              </p>
+
+              <div className="reveal-group mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {resolved.map((r) => (
+                  <article
+                    key={r.id}
+                    className="reveal hover-lift flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                  >
+                    {r.photo_path ? (
+                      <img
+                        src={publicPhotoUrl(r.photo_path, 320)}
+                        alt={r.title}
+                        loading="lazy"
+                        className="h-44 w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-44 w-full items-center justify-center bg-gradient-to-br from-success-50 to-primary-50">
+                        <Icon name="check-circle" size="xl" className="text-success-500" />
+                      </div>
+                    )}
+
+                    <div className="flex flex-1 flex-col p-5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-success-50 px-2.5 py-1 text-[11px] font-bold text-success-700 ring-1 ring-success-100">
+                          <Icon name="check-circle" size="sm" strokeWidth={2.4} />
+                          Resolved
+                        </span>
+                        <span className="text-[11px] font-semibold text-slate-400">{r.ref_code}</span>
+                      </div>
+
+                      <h3 className="mt-3 font-bold text-slate-900">{r.title}</h3>
+                      <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
+                        <Icon name="pin" size="sm" className="shrink-0 text-slate-400" />
+                        {r.barangay_name ?? r.department_name ?? CITY_NAME}
+                      </p>
+
+                      {r.resolved_at && (
+                        <p className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-xs text-slate-400">
+                          <Icon name="calendar" size="sm" className="shrink-0" />
+                          Resolved {new Date(r.resolved_at).toLocaleDateString("en-PH", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </p>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+        </Reveal>
+      )}
+
       {/* ================= FAQ ================= */}
       <Reveal>
         <section id="faq" className="mx-auto w-full max-w-3xl px-4 pb-16 sm:px-5 sm:pb-20">
@@ -319,6 +398,7 @@ export default function Landing() {
                 <div className="mt-3 flex flex-col gap-2 text-sm text-primary-100">
                   <a href="#how" className="transition hover:text-white">How it works</a>
                   <a href="#features" className="transition hover:text-white">Features</a>
+                  <a href="#resolved" className="transition hover:text-white">Resolved reports</a>
                   <a href="#faq" className="transition hover:text-white">FAQ</a>
                 </div>
               </div>

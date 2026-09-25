@@ -112,10 +112,12 @@ create table if not exists public.reports (
   longitude     double precision,
   address_text  text,
   is_possible_duplicate boolean not null default false,
+  resolved_at   timestamptz,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
 create index if not exists reports_status_idx   on public.reports (status);
+create index if not exists reports_resolved_idx on public.reports (resolved_at desc);
 create index if not exists reports_user_idx     on public.reports (user_id);
 create index if not exists reports_created_idx  on public.reports (created_at desc);
 create index if not exists reports_category_idx on public.reports (category_id);

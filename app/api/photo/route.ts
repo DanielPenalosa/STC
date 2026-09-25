@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cloudinaryConfigured, cloudinarySignedUrl } from "@/lib/storage/cloudinary";
+import { isPublicPhotoPath } from "@/lib/transparency";
 
 /**
  * GET /api/photo?path=<storage-path>&bucket=report-photos|verification-ids
@@ -14,7 +15,9 @@ import { cloudinaryConfigured, cloudinarySignedUrl } from "@/lib/storage/cloudin
  *
  * Access is enforced in code BEFORE any read, so missing/drifted bucket
  * policies on the database can never expose or hide photos:
- *   - report-photos    → any signed-in user (community browsing)
+ *   - report-photos    → any signed-in user (community browsing), plus
+ *                        anonymous visitors when the photo belongs to a
+ *                        RESOLVED report (public transparency feed)
  *   - verification-ids → admins only (sensitive ID documents)
  */
 const VALID_WIDTHS = [160, 320, 640, 960, 1600];
@@ -33,13 +36,20 @@ export async function GET(request: Request) {
 
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) return new NextResponse("Unauthorized", { status: 401 });
+
+  // Anonymous visitors may only see photos of RESOLVED reports — the exact
+  // set the public transparency feed shows. Everything else needs a session.
+  if (!auth.user) {
+    if (bucket !== "report-photos" || !(await isPublicPhotoPath(path))) {
+      return new NextResponse("Unauthorized", { status: 401 });
+    }
+  }
 
   if (bucket === "verification-ids") {
     const { data: profile } = await supabase
       .from("users")
       .select("role")
-      .eq("id", auth.user.id)
+      .eq("id", auth.user!.id)
       .maybeSingle();
     if (profile?.role !== "admin") {
       return new NextResponse("Forbidden", { status: 403 });
