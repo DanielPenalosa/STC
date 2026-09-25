@@ -531,7 +531,10 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_role text;
 begin
-  v_role := new.raw_user_meta_data->>'role';
+  -- coalesce first: public signup sends NO role key, and
+  -- "null not in (...)" evaluates to null, which would skip the fallback
+  -- and crash the insert on the NOT NULL role column
+  v_role := coalesce(new.raw_user_meta_data->>'role', 'citizen');
   if v_role not in ('citizen','admin','department','barangay') then
     v_role := 'citizen';
   end if;
