@@ -14,10 +14,18 @@ import { Icon } from "@/components/icons";
 import type { Notification } from "@/lib/types";
 
 function typeIcon(n: Notification) {
-  if (n.type === "urgent") return "alert" as const;
-  if (n.type === "assignment") return "inbox" as const;
-  if (n.type === "ai_review") return "robot" as const;
-  return "bell" as const;
+  switch (n.type) {
+    case "urgent": return "alert" as const;
+    case "assignment": return "inbox" as const;
+    case "ai_review":
+    case "auto_assigned": return "robot" as const;
+    case "new_report": return "file" as const;
+    case "verify": return "shield" as const;
+    case "registration": return "users" as const;
+    case "revision": return "edit" as const;
+    case "feedback": return "check-circle" as const;
+    default: return "bell" as const;
+  }
 }
 
 export default function NotificationsPage() {

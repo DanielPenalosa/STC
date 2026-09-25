@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon, type IconName } from "@/components/icons";
+import { useNotifications } from "@/components/providers";
 
 type NavItem = { href: string; label: string; icon: IconName; exact?: boolean };
 
@@ -26,6 +27,7 @@ export function MobileNav({
   actionLabel?: string;
 }) {
   const pathname = usePathname() ?? "";
+  const { badges } = useNotifications();
 
   // split items around the middle so the FAB sits centered over the bar
   const mid = Math.ceil(items.length / 2);
@@ -47,12 +49,22 @@ export function MobileNav({
           active ? "text-white" : "text-primary-200/70 active:text-white"
         }`}
       >
-        <span
-          className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
-            active ? "bg-primary-600" : ""
-          }`}
-        >
-          <Icon name={item.icon} size="md" />
+        <span className="relative">
+          <span
+            className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+              active ? "bg-primary-600" : ""
+            }`}
+          >
+            <Icon name={item.icon} size="md" />
+          </span>
+          {badges[item.href] > 0 && (
+            <span
+              className="absolute -top-0.5 -right-1.5 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-danger-500 px-[3px] text-[8px] font-semibold leading-none text-white ring-2 ring-navy"
+              aria-label={`${badges[item.href]} unread notifications`}
+            >
+              {badges[item.href] > 9 ? "9+" : badges[item.href]}
+            </span>
+          )}
         </span>
         <span className="max-w-full truncate">{item.label.split(" ")[0]}</span>
         {active && (

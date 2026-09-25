@@ -390,41 +390,8 @@ export async function runLocalAnalysisForReport(
           .update({ auto_assigned: true })
           .eq("id", analysisId);
 
-        // notify the assignee staff accounts
-        const col = isBarangay ? "barangay_id" : "department_id";
-        const { data: staff } = await admin
-          .from("users")
-          .select("id")
-          .eq("role", isBarangay ? "barangay" : "department")
-          .eq(col, target.id);
-        if (staff?.length) {
-          await admin.from("notifications").insert(
-            (staff as { id: string }[]).map((s) => ({
-              user_id: s.id,
-              report_id: reportId,
-              title: `New report assigned — ${rep.ref_code ?? rep.title.slice(0, 40)}`,
-              body: `AI routed this ${assignLevel}-level report to you: ${issueTitle}. ${result.urgency ? `Urgency: ${result.urgency.level}.` : ""}`,
-              type: "assignment",
-            }))
-          );
-        }
-
-        // notify ALL admins: the report was submitted and auto-assigned —
-        // this is the admins' only required touchpoint (oversight, not routing)
-        const { data: admins } = await admin.from("users").select("id").eq("role", "admin");
-        if (admins?.length) {
-          const brgyPart = rep.barangays?.name ? ` in Brgy. ${rep.barangays.name}` : "";
-          const flagged = result.needs_review ? " — flagged for admin verification" : "";
-          await admin.from("notifications").insert(
-            (admins as { id: string }[]).map((a) => ({
-              user_id: a.id,
-              report_id: reportId,
-              title: `Report auto-assigned — ${rep.ref_code ?? ""}`.trim(),
-              body: `"${rep.title.slice(0, 80)}"${brgyPart} → ${target.name} (${confPct}% AI confidence${flagged}).`,
-              type: "auto_assigned",
-            }))
-          );
-        }
+        // staff/admin/citizen notifications are sent by the
+        // on_assignment_created DB trigger (migration-20260925-notifications-v3)
       } else {
         console.error("AI auto-assign failed:", assignError.message);
       }

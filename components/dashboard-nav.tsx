@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon, type IconName } from "@/components/icons";
+import { useNotifications } from "@/components/providers";
 
 type NavItem = { href: string; label: string; icon: IconName; exact?: boolean };
 type NavGroup = { group?: string; items: NavItem[] };
 
 export function DashboardNav({ groups }: { groups: NavGroup[] }) {
   const pathname = usePathname() ?? "";
+  const { badges } = useNotifications();
 
   return (
     <>
@@ -38,8 +40,16 @@ export function DashboardNav({ groups }: { groups: NavGroup[] }) {
                   <span className={`text-current ${active ? "text-white" : "text-primary-200/70"}`}>
                     <Icon name={item.icon} size="md" />
                   </span>
-                  {item.label}
-                  {active && (
+                  <span className="min-w-0 truncate">{item.label}</span>
+                  {badges[item.href] > 0 && (
+                    <span
+                      className="ml-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger-500 px-1 text-[10px] font-semibold leading-none text-white"
+                      aria-label={`${badges[item.href]} unread notifications`}
+                    >
+                      {badges[item.href] > 9 ? "9+" : badges[item.href]}
+                    </span>
+                  )}
+                  {active && !badges[item.href] && (
                     <span className="ml-auto h-1.5 w-1.5 rounded-full bg-white" />
                   )}
                 </Link>

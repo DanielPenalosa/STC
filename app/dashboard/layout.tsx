@@ -109,7 +109,7 @@ export default async function DashboardLayout({
   const mobileNav = flatNav.filter((i) => i.href !== "/dashboard/notifications");
 
   return (
-    <RealtimeProvider userId={profile.id} initialNotifications={[]}>
+    <RealtimeProvider userId={profile.id} role={profile.role} initialNotifications={[]}>
       <div className="flex min-h-screen">
         {/* ---------- desktop sidebar (≥lg) ---------- */}
         <aside
