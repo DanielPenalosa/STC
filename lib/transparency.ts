@@ -15,7 +15,10 @@ export type PublicResolvedReport = {
   title: string;
   barangay_name: string | null;
   department_name: string | null;
-  photo_path: string | null;
+  /** first citizen photo (the reported state) */
+  photo_before: string | null;
+  /** first resolution photo uploaded in the done flow (the fixed state) */
+  photo_after: string | null;
   resolved_at: string | null;
 };
 
@@ -62,18 +65,23 @@ export async function getResolvedReports(
     }[]) ?? [];
 
   if (rows.length === 0) return { items: [], total: 0 };
-  // Fetch the first photo per report separately — embedding report_photos in
+  // Fetch the photos per report separately — embedding report_photos in
   // the same query makes PostgREST drop any report that has zero photos.
   const ids = rows.map((r) => r.id);
   const { data: photos } = await db
     .from("report_photos")
-    .select("report_id, storage_path, created_at")
+    .select("report_id, storage_path, kind, created_at")
     .in("report_id", ids)
     .order("created_at", { ascending: true });
 
-  const firstPhoto = new Map<string, string>();
-  for (const p of (photos as { report_id: string; storage_path: string }[]) ?? []) {
-    if (!firstPhoto.has(p.report_id)) firstPhoto.set(p.report_id, p.storage_path);
+  const before = new Map<string, string>();
+  const after = new Map<string, string>();
+  for (const p of (photos as { report_id: string; storage_path: string; kind: string }[]) ?? []) {
+    if (p.kind === "resolution") {
+      if (!after.has(p.report_id)) after.set(p.report_id, p.storage_path);
+    } else if (!before.has(p.report_id)) {
+      before.set(p.report_id, p.storage_path);
+    }
   }
 
   return {
@@ -83,7 +91,8 @@ export async function getResolvedReports(
       title: r.title,
       barangay_name: r.barangays?.name ?? null,
       department_name: r.departments?.name ?? null,
-      photo_path: firstPhoto.get(r.id) ?? null,
+      photo_before: before.get(r.id) ?? null,
+      photo_after: after.get(r.id) ?? null,
       resolved_at: r.resolved_at,
     })),
     total: typeof count === "number" ? count : rows.length,

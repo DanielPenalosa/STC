@@ -710,11 +710,11 @@ insert into public.categories (name, slug, description, color, icon) values
 on conflict (slug) do nothing;
 
 insert into public.departments (name, slug, description, color) values
-  ('[DEPARTMENT] Engineering Office',      'engineering',      'Roads, infrastructure and public works', '#F5E606'),
-  ('[DEPARTMENT] Water & Sanitation Office','water-sanitation', 'Water systems and sanitation services',  '#06ABEA'),
-  ('[DEPARTMENT] Utilities Office',        'utilities',        'Electricity and utility coordination',   '#2333A0'),
-  ('[DEPARTMENT] Environment Office',      'environment',      'Environmental protection and cleanliness','#2E8254'),
-  ('[DEPARTMENT] Public Safety Office',    'public-safety',    'Safety, hazards and emergency response', '#DF1B2C')
+  ('Engineering Office',        'engineering',      'Roads, infrastructure and public works', '#F5E606'),
+  ('Water & Sanitation Office', 'water-sanitation', 'Water systems and sanitation services',  '#06ABEA'),
+  ('Utilities Office',          'utilities',        'Electricity and utility coordination',   '#2333A0'),
+  ('Environment Office',        'environment',      'Environmental protection and cleanliness','#2E8254'),
+  ('Public Safety Office',      'public-safety',    'Safety, hazards and emergency response', '#DF1B2C')
 on conflict (slug) do nothing;
 
 -- The 26 official barangays of Sta. Cruz, Laguna with OpenStreetMap

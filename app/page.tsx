@@ -4,7 +4,7 @@ import { Icon, type IconName } from "@/components/icons";
 import { Reveal } from "@/components/reveal";
 import HeroShowcase from "./hero-showcase";
 import { getResolvedReports } from "@/lib/transparency";
-import { publicPhotoUrl } from "@/lib/photo";
+import ResolvedCarousel from "./resolved-carousel";
 
 // The transparency feed must reflect the database live — never prerender a
 // static snapshot of resolved reports.
@@ -266,58 +266,12 @@ export default async function Landing() {
                 Recent resolved reports
               </h2>
               <p className="reveal mx-auto mt-3 max-w-xl text-center text-sm leading-relaxed text-slate-500">
-                Real issues reported by your neighbors — fixed and verified. Photos are
-                shown for resolved reports only; no citizen information is ever shown.
+                Real issues reported by your neighbors — fixed and verified. Before/after
+                photos are shown for resolved reports only; no citizen information is ever shown.
               </p>
 
-              <div className="reveal-group mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {resolved.map((r) => (
-                  <article
-                    key={r.id}
-                    className="reveal hover-lift flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white"
-                  >
-                    {r.photo_path ? (
-                      <img
-                        src={publicPhotoUrl(r.photo_path, 320)}
-                        alt={r.title}
-                        loading="lazy"
-                        className="h-44 w-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-44 w-full items-center justify-center bg-gradient-to-br from-success-50 to-primary-50">
-                        <Icon name="check-circle" size="xl" className="text-success-500" />
-                      </div>
-                    )}
-
-                    <div className="flex flex-1 flex-col p-5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-success-50 px-2.5 py-1 text-[11px] font-bold text-success-700 ring-1 ring-success-100">
-                          <Icon name="check-circle" size="sm" strokeWidth={2.4} />
-                          Resolved
-                        </span>
-                        <span className="text-[11px] font-semibold text-slate-400">{r.ref_code}</span>
-                      </div>
-
-                      <h3 className="mt-3 font-bold text-slate-900">{r.title}</h3>
-                      <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
-                        <Icon name="pin" size="sm" className="shrink-0 text-slate-400" />
-                        {r.barangay_name ?? r.department_name ?? CITY_NAME}
-                      </p>
-
-                      {r.resolved_at && (
-                        <p className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-xs text-slate-400">
-                          <Icon name="calendar" size="sm" className="shrink-0" />
-                          Resolved {new Date(r.resolved_at).toLocaleDateString("en-PH", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
-                        </p>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
+              {/* single-card carousel — saves vertical space vs a grid */}
+              <ResolvedCarousel items={resolved} />
             </div>
           </section>
         </Reveal>
