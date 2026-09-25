@@ -82,7 +82,11 @@ body {
    Motion — page transitions & micro-interactions
    ============================================================ */
 
-/* page enter: quick pure fade — no translate, no layout shift */
+/* page enter: quick pure fade — no translate, no layout shift.
+   The end state must be `none`, not translateY(0): a retained identity
+   transform makes .page-enter the containing block for position:fixed
+   descendants, which would center dashboard modals in the content column
+   instead of the viewport. */
 @keyframes page-in {
   from {
     opacity: 0;
@@ -90,7 +94,7 @@ body {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
