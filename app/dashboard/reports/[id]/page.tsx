@@ -124,7 +124,10 @@ export default async function ReportDetailPage({
       .select("id, message, created_at, user_id")
       .eq("report_id", report.id)
       .order("created_at", { ascending: false }),
-    supabase.from("report_feedback").select("rating, comment").eq("report_id", report.id).maybeSingle(),
+    supabase
+      .from("report_feedback")
+      .select("user_id, rating, comment")
+      .eq("report_id", report.id),
     supabase
       .from("report_follows")
       .select("user_id")
@@ -182,7 +185,19 @@ export default async function ReportDetailPage({
     created_at: f.created_at,
     author: followupNames[f.user_id] ?? "Citizen",
   }));
-  const feedback = (feedbackRes.data as unknown as { rating: number; comment: string | null } | null) ?? null;
+  // ratings are per-user now (the community rates resolved reports, not just
+  // the reporter) — aggregate them; "my" rating feeds the FeedbackCard
+  const feedbackRows =
+    (feedbackRes.data as unknown as {
+      user_id: string;
+      rating: number;
+      comment: string | null;
+    }[] | null) ?? [];
+  const feedback =
+    feedbackRows.find((f) => f.user_id === profile.id) ?? null;
+  const ratingAvg = feedbackRows.length
+    ? feedbackRows.reduce((s, f) => s + f.rating, 0) / feedbackRows.length
+    : 0;
 
   /* "by <name>" attribution for the timeline */
   const changerIds = Array.from(
@@ -585,25 +600,44 @@ export default async function ReportDetailPage({
             items={followups}
           />
 
-          {/* reporter's rating — opens after resolution */}
-          {isReporter && report.status === "resolved" && (
+          {/* the viewer's rating — opens to any signed-in user after resolution */}
+          {!isStaff && report.status === "resolved" && (
             <FeedbackCard reportId={report.id} existing={feedback} />
           )}
-          {feedback && (!isReporter || report.status !== "resolved") && (
+          {feedbackRows.length > 0 && (
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="flex items-center gap-2 text-sm font-bold text-slate-800">
-                <Icon name="sparkles" size="md" className="text-primary-600" />
-                Citizen Feedback
+                <Icon name="star" size="md" className="text-amber-500" />
+                Community Feedback ({feedbackRows.length})
               </p>
               <div className="mt-2 flex items-center gap-1">
                 {Array.from({ length: 5 }, (_, i) => (
-                  <span key={i} className={i < feedback.rating ? "text-amber-500" : "text-slate-200"}>★</span>
+                  <span
+                    key={i}
+                    className={
+                      i < Math.round(ratingAvg) ? "text-amber-500" : "text-slate-200"
+                    }
+                  >
+                    ★
+                  </span>
                 ))}
-                <span className="ml-1 text-xs font-bold text-slate-600">{feedback.rating}/5</span>
+                <span className="ml-1 text-xs font-bold text-slate-600">
+                  {ratingAvg.toFixed(1)}/5 · {feedbackRows.length} rating
+                  {feedbackRows.length === 1 ? "" : "s"}
+                </span>
               </div>
-              {feedback.comment && (
-                <p className="mt-1 text-[13px] italic text-slate-500">“{feedback.comment}”</p>
-              )}
+              <div className="mt-2 space-y-1.5">
+                {feedbackRows
+                  .filter((f) => f.comment)
+                  .map((f) => (
+                    <p
+                      key={f.user_id}
+                      className="text-[13px] italic text-slate-500"
+                    >
+                      “{f.comment}”
+                    </p>
+                  ))}
+              </div>
             </section>
           )}
 
