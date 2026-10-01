@@ -5,6 +5,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cleanupReportPhotos } from "@/lib/storage/cleanup";
 import { requireProfile } from "@/lib/data";
+import {
+  postResolvedReportToFacebook,
+  facebookConfigured,
+  getFacebookPageInfo,
+} from "@/lib/facebook";
 import type { ReportStatus } from "@/lib/constants";
 import type {
   Barangay,
@@ -103,9 +108,61 @@ export async function setReportStatus(
     .update({ status })
     .eq("id", reportId);
   if (error) return { ok: false, error: error.message };
+
+  // a report just became RESOLVED → auto-post it to the city's Facebook
+  // Page (best-effort, fire-and-forget: a Graph outage must never block
+  // the admin's approval; failures land in the server logs)
+  if (status === "resolved") {
+    void publishToFacebook(reportId);
+  }
+
   revalidatePath("/dashboard/reports");
   revalidatePath(`/dashboard/reports/${reportId}`);
+  revalidatePath("/dashboard/community");
   return { ok: true };
+}
+
+/**
+ * Fire-and-forget Facebook publication for a resolved report. Loads the
+ * report + its first before/after photos with the service role and posts
+ * them through the Graph API. Never throws.
+ */
+async function publishToFacebook(reportId: string): Promise<void> {
+  try {
+    if (!facebookConfigured()) return;
+    const db = createAdminClient();
+    const { data: report } = await db
+      .from("reports")
+      .select(
+        `id, ref_code, title, resolved_at, categories(name), barangays(name),
+         report_photos(storage_path, kind, created_at)`
+      )
+      .eq("id", reportId)
+      .maybeSingle();
+    const r = report as
+      | {
+          ref_code: string;
+          title: string;
+          resolved_at: string | null;
+          categories: { name: string } | null;
+          barangays: { name: string } | null;
+          report_photos: { storage_path: string; kind: string; created_at: string }[];
+        }
+      | null;
+    if (!r) return;
+    const sorted = (r.report_photos ?? []).slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
+    await postResolvedReportToFacebook({
+      refCode: r.ref_code,
+      title: r.title,
+      categoryName: r.categories?.name ?? null,
+      barangayName: r.barangays?.name ?? null,
+      resolvedAt: r.resolved_at,
+      photoBeforePath: sorted.find((p) => p.kind === "citizen")?.storage_path ?? null,
+      photoAfterPath: sorted.find((p) => p.kind === "resolution")?.storage_path ?? null,
+    });
+  } catch (e) {
+    console.error("[facebook] auto-post failed:", e instanceof Error ? e.message : e);
+  }
 }
 
 export async function setPriority(
@@ -617,6 +674,26 @@ export async function notifyAdminsOfUrgent(
 }
 
 /* ------------------------------ settings ------------------------------ */
+
+/** Admin: check the Facebook Page connection (token + page id from env). */
+export async function testFacebookConnection(): Promise<{
+  ok: boolean;
+  configured: boolean;
+  name?: string;
+  link?: string;
+  error?: string;
+}> {
+  await requireAdmin();
+  if (!facebookConfigured()) {
+    return {
+      ok: false,
+      configured: false,
+      error: "Set FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN in your environment first.",
+    };
+  }
+  const info = await getFacebookPageInfo();
+  return { ...info, configured: true };
+}
 
 export async function saveSettings(
   entries: { key: string; value: string }[]

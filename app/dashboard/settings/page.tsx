@@ -4,6 +4,7 @@ import { PageHeader, Card } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo, CLIENT_NAME, CITY_NAME, TAGLINE } from "@/app/brand";
 import SettingsForm from "./form";
+import FacebookCard from "./facebook-card";
 
 /**
  * Settings is shared by admin and staff:
@@ -72,6 +73,7 @@ export default async function SettingsPage() {
             <code className="rounded bg-slate-100 px-1">.env.local</code>) and every screen updates.
           </Card>
           <SettingsForm initial={settings} />
+          <FacebookCard />
         </>
       ) : (
         <p className="px-1 text-xs text-slate-400">
