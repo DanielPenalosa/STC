@@ -36,11 +36,20 @@ export function facebookConfigured(): boolean {
   return Boolean(process.env.FACEBOOK_PAGE_ACCESS_TOKEN && process.env.FACEBOOK_PAGE_ID);
 }
 
+/**
+ * POST to the Graph API. Uses form-urlencoded — the format the Pages API
+ * documentation specifies. (A JSON body works for simple fields but Graph
+ * silently ignores bracketed keys like attached_media[0], dropping photos
+ * without any error.)
+ */
 async function graph<T>(path: string, params: Record<string, string>): Promise<T> {
   const res = await fetch(`${GRAPH}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...params, access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      ...params,
+      access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN ?? "",
+    }),
     // don't hang the resolve action on a slow Graph call
     signal: AbortSignal.timeout(15_000),
   });
@@ -111,21 +120,35 @@ export async function postResolvedReportToFacebook(input: {
 
   try {
     const photoIds: string[] = [];
-    const after = input.photoAfterPath
-      ? await graph<{ id: string }>("/me/photos", {
-          url: photoUrl(input.photoAfterPath, 960),
-          published: "false",
-        })
-      : null;
-    if (after?.id) photoIds.push(after.id);
 
-    const before = input.photoBeforePath
-      ? await graph<{ id: string }>("/me/photos", {
-          url: photoUrl(input.photoBeforePath, 960),
+    // Upload each photo unpublished, then attach all of them to one feed
+    // post. A single broken photo must not drop the whole album — tolerate
+    // per-photo failure and post with whatever made it through.
+    const tryPhoto = async (path: string | null, label: string) => {
+      if (!path) return;
+      const url = photoUrl(path, 960);
+      try {
+        const res = await graph<{ id: string }>("/me/photos", {
+          url,
           published: "false",
-        })
-      : null;
-    if (before?.id) photoIds.push(before.id);
+        });
+        if (res?.id) photoIds.push(res.id);
+      } catch (e) {
+        console.error(
+          `[facebook] ${label} photo upload failed (${url}):`,
+          e instanceof Error ? e.message : e
+        );
+      }
+    };
+
+    await tryPhoto(input.photoAfterPath, "after");
+    await tryPhoto(input.photoBeforePath, "before");
+
+    if (photoIds.length < 2 && (input.photoAfterPath || input.photoBeforePath)) {
+      console.warn(
+        `[facebook] posting with ${photoIds.length}/2 photo(s) for ${input.refCode}`
+      );
+    }
 
     let postId: string | undefined;
     if (photoIds.length > 0) {
@@ -141,8 +164,15 @@ export async function postResolvedReportToFacebook(input: {
       postId = res.id;
     }
 
+    console.log(
+      `[facebook] posted ${input.refCode} (${photoIds.length} photo(s)) → post ${postId ?? "?"}`
+    );
     return { ok: true, postId };
   } catch (e) {
+    console.error(
+      `[facebook] auto-post failed for ${input.refCode}:`,
+      e instanceof Error ? e.message : e
+    );
     return { ok: false, error: e instanceof Error ? e.message : "Facebook post failed" };
   }
 }
