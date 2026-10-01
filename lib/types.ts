@@ -123,6 +123,18 @@ export type ReportFeedback = {
   created_at: string;
 };
 
+/** Community engagement payload (client-shaped) for a resolved report. */
+export type CommunityComment = {
+  id: string;
+  reportId: string;
+  /** display name, emails hidden upstream */
+  author: string;
+  message: string;
+  createdAt: string;
+  /** true when the signed-in viewer wrote it (shows delete affordance) */
+  mine: boolean;
+};
+
 export type ReportPhoto = {
   id: string;
   report_id: string;

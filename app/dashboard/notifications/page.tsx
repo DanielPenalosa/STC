@@ -24,6 +24,8 @@ function typeIcon(n: Notification) {
     case "registration": return "users" as const;
     case "revision": return "edit" as const;
     case "feedback": return "check-circle" as const;
+    case "like": return "heart" as const;
+    case "comment": return "chat" as const;
     default: return "bell" as const;
   }
 }

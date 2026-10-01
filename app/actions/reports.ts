@@ -18,7 +18,7 @@ import {
   type NewReportFacts,
 } from "@/lib/ai/duplicate";
 import { cleanupReportPhotos, cleanupReportPhoto } from "@/lib/storage/cleanup";
-import type { Report, ReportPhoto } from "@/lib/types";
+import type { Report, ReportPhoto, CommunityComment } from "@/lib/types";
 import type { ReportStatus } from "@/lib/constants";
 
 export type ActionResult = { ok: boolean; error?: string; reportId?: string };
@@ -707,7 +707,10 @@ export async function addFollowup(
 }
 
 /* ------------------------------------------------------------------ */
-/* Citizen: rate a resolved report (1–5 stars + comment)               */
+/* Community: rate a resolved report (1–5 stars + comment)             */
+/* Opens to ANY signed-in user on RESOLVED reports — the community     */
+/* votes on how well the city handled the issue, not just reporters.   */
+/* One rating per user per report (upsert = changing your rating).     */
 /* ------------------------------------------------------------------ */
 
 export async function submitFeedback(
@@ -722,28 +725,155 @@ export async function submitFeedback(
   const supabase = await createClient();
   const profile = await requireProfile();
 
-  const { data: owned } = await supabase
+  const { data: found } = await supabase
     .from("reports")
-    .select("id, user_id, status")
+    .select("id, status")
     .eq("id", reportId)
     .maybeSingle();
-  const report = owned as { id: string; user_id: string; status: string } | null;
-  if (!report || report.user_id !== profile.id) {
-    return { ok: false, error: "Only the reporter can leave feedback." };
-  }
+  const report = found as { id: string; status: string } | null;
+  if (!report) return { ok: false, error: "Report not found." };
   if (report.status !== "resolved") {
     return { ok: false, error: "Feedback opens once the report is resolved." };
   }
 
-  // RLS double-checks resolved+owner; the trigger alerts admins
-  const { error } = await supabase.from("report_feedback").insert({
-    report_id: reportId,
-    user_id: profile.id,
-    rating,
-    comment: comment.trim() || null,
-  });
+  // RLS double-checks resolved; the trigger alerts admins
+  const { error } = await supabase
+    .from("report_feedback")
+    .upsert(
+      {
+        report_id: reportId,
+        user_id: profile.id,
+        rating,
+        comment: comment.trim() || null,
+      },
+      { onConflict: "report_id,user_id" }
+    );
   if (error) return { ok: false, error: error.message };
 
   revalidatePath(`/dashboard/reports/${reportId}`);
+  revalidatePath("/dashboard/community");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* Community: like / unlike a resolved report                          */
+/* ------------------------------------------------------------------ */
+
+export async function toggleLike(
+  reportId: string
+): Promise<ActionResult & { liked?: boolean }> {
+  const supabase = await createClient();
+  const profile = await requireProfile();
+
+  const { data: found } = await supabase
+    .from("reports")
+    .select("id, status")
+    .eq("id", reportId)
+    .maybeSingle();
+  const report = found as { id: string; status: string } | null;
+  if (!report) return { ok: false, error: "Report not found." };
+  if (report.status !== "resolved") {
+    return { ok: false, error: "Only resolved reports can be liked." };
+  }
+
+  const { data: existing } = await supabase
+    .from("report_likes")
+    .select("user_id")
+    .eq("report_id", reportId)
+    .eq("user_id", profile.id)
+    .maybeSingle();
+
+  if (existing) {
+    const { error } = await supabase
+      .from("report_likes")
+      .delete()
+      .eq("report_id", reportId)
+      .eq("user_id", profile.id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, liked: false };
+  }
+
+  // the DB trigger notifies the reporter (skips self-likes)
+  const { error } = await supabase
+    .from("report_likes")
+    .insert({ report_id: reportId, user_id: profile.id });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, liked: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* Community: comment on a resolved report                             */
+/* ------------------------------------------------------------------ */
+
+export async function addCommunityComment(
+  reportId: string,
+  message: string
+): Promise<ActionResult & { comment?: CommunityComment }> {
+  const trimmed = message.trim();
+  if (!trimmed) return { ok: false, error: "Write a comment first." };
+  if (trimmed.length > 1000) return { ok: false, error: "Keep it under 1000 characters." };
+
+  const supabase = await createClient();
+  const profile = await requireProfile();
+
+  const { data: found } = await supabase
+    .from("reports")
+    .select("id, status")
+    .eq("id", reportId)
+    .maybeSingle();
+  const report = found as { id: string; status: string } | null;
+  if (!report) return { ok: false, error: "Report not found." };
+  if (report.status !== "resolved") {
+    return { ok: false, error: "Comments open once the report is resolved." };
+  }
+
+  // the DB trigger notifies the reporter (skips self-comments)
+  const { data, error } = await supabase
+    .from("report_comments")
+    .insert({ report_id: reportId, user_id: profile.id, message: trimmed })
+    .select("id, message, created_at")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  const row = data as { id: string; message: string; created_at: string };
+  return {
+    ok: true,
+    comment: {
+      id: row.id,
+      reportId,
+      author: profile.full_name?.includes("@") ? "Community member" : (profile.full_name ?? "Community member"),
+      message: row.message,
+      createdAt: row.created_at,
+      mine: true,
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Community: delete your own comment (admins moderate via DB)         */
+/* ------------------------------------------------------------------ */
+
+export async function deleteCommunityComment(
+  commentId: string
+): Promise<ActionResult> {
+  const supabase = await createClient();
+  const profile = await requireProfile();
+
+  const { data: found } = await supabase
+    .from("report_comments")
+    .select("id, user_id")
+    .eq("id", commentId)
+    .maybeSingle();
+  const row = found as { id: string; user_id: string } | null;
+  if (!row) return { ok: false, error: "Comment not found." };
+  if (row.user_id !== profile.id) {
+    return { ok: false, error: "You can only delete your own comments." };
+  }
+
+  const { error } = await supabase
+    .from("report_comments")
+    .delete()
+    .eq("id", commentId);
+  if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
