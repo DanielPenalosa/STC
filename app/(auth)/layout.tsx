@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { Logo, CLIENT_NAME, CITY_NAME, TAGLINE } from "@/app/brand";
+import { TAGLINE } from "@/app/brand";
+import { AuthLogo } from "@/components/auth-logo";
 import { Icon, type IconName } from "@/components/icons";
 
 const HIGHLIGHTS: { icon: IconName; title: string; text: string }[] = [
@@ -29,7 +29,7 @@ export default function AuthLayout({
     <main className="flex min-h-screen bg-surface">
       {/* brand panel — desktop only, blue texture like the dashboard chrome */}
       <aside
-        className="relative hidden w-[46%] flex-col justify-between overflow-hidden bg-navy bg-cover bg-center p-10 text-white lg:flex"
+        className="relative hidden w-[46%] flex-col justify-between self-start overflow-hidden bg-navy bg-cover bg-center p-10 text-white lg:sticky lg:top-0 lg:flex lg:h-screen"
         style={{ backgroundImage: "url('/blue-bg.jpg')" }}
       >
         {/* soft glow */}
@@ -37,20 +37,21 @@ export default function AuthLayout({
           className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full opacity-25 blur-3xl"
           style={{ background: "radial-gradient(circle, #06ABEA, transparent 65%)" }}
         />
+        <div
+          className="pointer-events-none absolute -bottom-32 -left-20 h-80 w-80 rounded-full opacity-15 blur-3xl"
+          style={{ background: "radial-gradient(circle, #2E8254, transparent 65%)" }}
+        />
 
-        <Link href="/" className="relative flex items-center gap-3">
-          <Logo size={40} />
-          <div>
-            <p className="text-sm font-bold">{CLIENT_NAME}</p>
-            <p className="text-xs text-primary-200">{CITY_NAME}</p>
-          </div>
-        </Link>
-
-        <div className="relative">
-          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-accent-300">
+        {/* centered municipal seal — plain logo, no effects */}
+        <div className="relative flex flex-col items-center text-center">
+          <AuthLogo size={112} />
+          <p className="mt-5 text-[11px] font-bold uppercase tracking-[0.22em] text-accent-300">
             {TAGLINE}
           </p>
-          <h1 className="mt-3 text-3xl font-extrabold leading-tight">
+        </div>
+
+        <div className="relative">
+          <h1 className="text-3xl font-extrabold leading-tight">
             Report community issues.
             <br />
             <span className="text-accent-300">Track them to resolution.</span>
@@ -70,25 +71,22 @@ export default function AuthLayout({
           </div>
         </div>
 
-        <p className="relative text-xs text-slate-500">
-          © {new Date().getFullYear()} {CLIENT_NAME} · {CITY_NAME}
+        <p className="relative text-center text-xs text-slate-500">
+          © {new Date().getFullYear()} · All rights reserved
         </p>
       </aside>
 
-      {/* form panel */}
-      <section className="flex flex-1 flex-col items-center justify-center px-4 py-10">
-        {/* mobile brand */}
-        <Link href="/" className="mb-8 flex items-center gap-3 lg:hidden">
-          <Logo size={40} />
-          <div>
-            <p className="font-bold text-slate-900">{CLIENT_NAME}</p>
-            <p className="text-xs text-slate-500">{CITY_NAME}</p>
-          </div>
-        </Link>
-        <div className="page-enter w-full max-w-md">{children}</div>
-        <p className="mt-8 text-xs text-slate-400 lg:hidden">
-          {CLIENT_NAME} · {CITY_NAME}
-        </p>
+      {/* form panel — soft ambient gradient instead of a flat background */}
+      <section className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-4 py-10">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-32 right-[-15%] h-96 w-96 rounded-full bg-primary-100/50 blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-40 left-[-15%] h-96 w-96 rounded-full bg-accent-100/40 blur-3xl"
+        />
+        <div className="page-enter relative w-full max-w-md">{children}</div>
       </section>
     </main>
   );

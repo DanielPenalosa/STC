@@ -6,7 +6,6 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { btn } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { CLIENT_NAME } from "@/app/brand";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -53,38 +52,45 @@ export default function LoginForm() {
     router.refresh();
   }
 
+  /* ---------- shared design tokens ---------- */
   const inputShell =
-    "flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 transition focus-within:border-primary-400 focus-within:ring-4 focus-within:ring-primary-50";
+    "group flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-4 transition-all focus-within:border-primary-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-primary-500/10";
+  const field =
+    "w-full bg-transparent py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400";
+  const label =
+    "mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400";
 
   if (gated) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+      <div className="rounded-3xl border border-slate-200/80 bg-white p-7 shadow-xl shadow-slate-900/5 sm:p-9">
         <span
-          className={`mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl ${
+          className={`mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl ${
             gated.status === "rejected" ? "bg-danger-50 text-danger-600" : "bg-warn-50 text-warn-600"
           }`}
         >
           <Icon name={gated.status === "rejected" ? "close" : "clock"} size="lg" />
         </span>
-        {gated.status === "pending" ? (
-          <>
-            <h1 className="text-xl font-bold text-slate-900">Awaiting approval</h1>
-            <p className="mt-2 text-sm leading-relaxed text-slate-500">
-              Your account and ID have been received. An administrator is
-              reviewing your registration — you&apos;ll be able to sign in once
-              it&apos;s approved.
-            </p>
-          </>
-        ) : (
-          <>
-            <h1 className="text-xl font-bold text-slate-900">Registration not approved</h1>
-            <p className="mt-2 text-sm leading-relaxed text-slate-500">
-              {gated.reason ??
-                "Your registration was rejected by an administrator. Please contact the municipal office for assistance."}
-            </p>
-          </>
-        )}
-        <Link href="/" className={`${btn.secondary} press mt-5 w-full justify-center`}>
+        <div className="text-center">
+          {gated.status === "pending" ? (
+            <>
+              <h1 className="text-xl font-extrabold tracking-tight text-slate-900">Awaiting approval</h1>
+              <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-slate-500">
+                Your account and ID have been received. An administrator is
+                reviewing your registration — you&apos;ll be able to sign in once
+                it&apos;s approved.
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="text-xl font-extrabold tracking-tight text-slate-900">Registration not approved</h1>
+              <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-slate-500">
+                {gated.reason ??
+                  "Your registration was rejected by an administrator. Please contact the municipal office for assistance."}
+              </p>
+            </>
+          )}
+        </div>
+        <Link href="/" className={`${btn.secondary} press mt-6 w-full justify-center rounded-2xl py-3`}>
           Back to home
         </Link>
       </div>
@@ -92,30 +98,43 @@ export default function LoginForm() {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
-      <div className="mb-6">
-        <span className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
-          <Icon name="logout" size="lg" />
-        </span>
-        <h1 className="text-xl font-bold text-slate-900">Welcome back</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Sign in to {CLIENT_NAME}&apos;s reporting system.
+    <div className="rounded-3xl border border-slate-200/80 bg-white p-7 shadow-xl shadow-slate-900/5 sm:p-9">
+      {/* header with Login / Sign up switcher */}
+      <div className="mb-7">
+        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Welcome back</h1>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-500">
+          Sign in to continue reporting community issues.
         </p>
+
+        <div className="mt-6 grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1.5">
+          <span
+            aria-current="page"
+            className="flex items-center justify-center gap-2 rounded-xl bg-white py-2.5 text-sm font-semibold text-slate-900 shadow-md shadow-slate-900/5"
+          >
+            <Icon name="login" size="md" />
+            Login
+          </span>
+          <Link
+            href="/register"
+            className="press flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-medium text-slate-500 transition hover:text-slate-700"
+          >
+            <Icon name="user-plus" size="md" />
+            Sign up
+          </Link>
+        </div>
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-4">
+      <form onSubmit={onSubmit} className="space-y-5">
         <div>
-          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400" htmlFor="email">
-            Email
-          </label>
+          <label className={label} htmlFor="email">Email address</label>
           <div className={inputShell}>
-            <Icon name="mail" size="md" className="shrink-0 text-slate-300" />
+            <Icon name="mail" size="md" className="shrink-0 text-slate-400 transition-colors group-focus-within:text-primary-500" />
             <input
               id="email"
               type="email"
               required
               autoComplete="email"
-              className="w-full bg-transparent py-2.5 text-sm outline-none placeholder:text-slate-300"
+              className={field}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
@@ -124,25 +143,32 @@ export default function LoginForm() {
         </div>
 
         <div>
-          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400" htmlFor="password">
-            Password
-          </label>
+          <div className="flex items-end justify-between">
+            <label className={label} htmlFor="password">Password</label>
+            <button
+              type="button"
+              onClick={() => setShowPw((s) => !s)}
+              className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-primary-600 hover:text-primary-700"
+            >
+              {showPw ? "Hide" : "Show"}
+            </button>
+          </div>
           <div className={inputShell}>
-            <Icon name="lock" size="md" className="shrink-0 text-slate-300" />
+            <Icon name="lock" size="md" className="shrink-0 text-slate-400 transition-colors group-focus-within:text-primary-500" />
             <input
               id="password"
               type={showPw ? "text" : "password"}
               required
               autoComplete="current-password"
-              className="w-full bg-transparent py-2.5 text-sm outline-none placeholder:text-slate-300"
+              className={field}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="Enter your password"
             />
             <button
               type="button"
               onClick={() => setShowPw((s) => !s)}
-              className="shrink-0 rounded p-1 text-slate-300 hover:text-slate-500"
+              className="shrink-0 rounded-lg p-1 text-slate-300 hover:text-slate-500"
               aria-label={showPw ? "Hide password" : "Show password"}
             >
               <Icon name={showPw ? "eye-off" : "eye"} size="md" />
@@ -151,27 +177,36 @@ export default function LoginForm() {
         </div>
 
         {error && (
-          <p className="flex items-center gap-2 rounded-xl bg-danger-50 px-3.5 py-2.5 text-sm text-danger-600">
+          <p className="flex items-center gap-2.5 rounded-2xl bg-danger-50 px-4 py-3 text-sm font-medium text-danger-600 ring-1 ring-danger-100">
             <Icon name="alert" size="md" className="shrink-0" />
             {error}
           </p>
         )}
 
-        <button type="submit" disabled={loading} className={`${btn.primary} press w-full py-2.5`}>
+        <button
+          type="submit"
+          disabled={loading}
+          className="press mt-1 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-primary-500 to-primary-700 py-3.5 text-sm font-bold text-white shadow-lg shadow-primary-600/25 transition hover:from-primary-400 hover:to-primary-600 disabled:opacity-60"
+        >
           {loading ? "Signing in…" : "Sign in"}
           {!loading && <Icon name="chevron-right" size="md" />}
         </button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-slate-500">
+      <p className="mt-7 text-center text-sm text-slate-500">
         New citizen?{" "}
-        <Link href="/register" className="font-semibold text-primary-600 hover:underline">
+        <Link href="/register" className="font-bold text-primary-600 hover:text-primary-700 hover:underline">
           Create an account
         </Link>
       </p>
-      <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-center text-xs text-slate-400">
-        Department, Barangay and Admin accounts are issued by the system administrator. Citizen accounts require ID verification.
-      </p>
+
+      <div className="mt-5 flex items-start gap-2.5 rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+        <Icon name="shield" size="md" className="mt-0.5 shrink-0 text-slate-400" />
+        <p className="text-xs leading-relaxed text-slate-500">
+          Department, Barangay and Admin accounts are issued by the system
+          administrator. Citizen accounts require ID verification.
+        </p>
+      </div>
     </div>
   );
 }

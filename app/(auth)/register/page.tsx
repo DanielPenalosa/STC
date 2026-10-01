@@ -8,7 +8,6 @@ import { compressImage } from "@/lib/compress";
 import { registerCitizen, saveIdPhotoPath } from "@/app/actions/auth";
 import { btn } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { CLIENT_NAME } from "@/app/brand";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -114,15 +113,15 @@ export default function RegisterPage() {
   }
 
   const inputShell =
-    "flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 transition focus-within:border-primary-400 focus-within:ring-4 focus-within:ring-primary-50";
+    "group flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-4 transition-all focus-within:border-primary-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-primary-500/10";
   const field =
-    "w-full bg-transparent py-2.5 text-sm outline-none placeholder:text-slate-300";
+    "w-full bg-transparent py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400";
   const label =
-    "mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400";
+    "mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400";
 
   if (confirmSent) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-7 text-center shadow-sm sm:p-8">
+      <div className="rounded-3xl border border-slate-200/80 bg-white p-7 text-center shadow-xl shadow-slate-900/5 sm:p-9">
         <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
           <Icon name="mail" size="lg" />
         </span>
@@ -144,7 +143,7 @@ export default function RegisterPage() {
 
   if (awaitingApproval) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-7 text-center shadow-sm sm:p-8">
+      <div className="rounded-3xl border border-slate-200/80 bg-white p-7 text-center shadow-xl shadow-slate-900/5 sm:p-9">
         <span
           className={`mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl ${
             aiApproved ? "bg-success-50 text-success-600" : "bg-warn-50 text-warn-600"
@@ -166,16 +165,31 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
-      <div className="mb-6">
-        <span className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
-          <Icon name="shield" size="lg" />
-        </span>
-        <h1 className="text-xl font-bold text-slate-900">Create your account</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Join {CLIENT_NAME}&apos;s reporting system. A valid ID is required to
+    <div className="rounded-3xl border border-slate-200/80 bg-white p-7 shadow-xl shadow-slate-900/5 sm:p-9">
+      {/* header with Login / Sign up switcher */}
+      <div className="mb-7">
+        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Create your account</h1>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-500">
+          Join the community reporting system. A valid ID is required to
           verify you as a resident.
         </p>
+
+        <div className="mt-6 grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1.5">
+          <Link
+            href="/login"
+            className="press flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-medium text-slate-500 transition hover:text-slate-700"
+          >
+            <Icon name="login" size="md" />
+            Login
+          </Link>
+          <span
+            aria-current="page"
+            className="flex items-center justify-center gap-2 rounded-xl bg-white py-2.5 text-sm font-semibold text-slate-900 shadow-md shadow-slate-900/5"
+          >
+            <Icon name="user-plus" size="md" />
+            Sign up
+          </span>
+        </div>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4">
@@ -273,28 +287,35 @@ export default function RegisterPage() {
         </div>
 
         {error && (
-          <p className="flex items-start gap-2 rounded-xl bg-danger-50 px-3.5 py-2.5 text-sm leading-relaxed text-danger-600">
+          <p className="flex items-start gap-2.5 rounded-2xl bg-danger-50 px-4 py-3 text-sm font-medium leading-relaxed text-danger-600 ring-1 ring-danger-100">
             <Icon name="alert" size="md" className="mt-0.5 shrink-0" />
             {error}
           </p>
         )}
 
-        <button type="submit" disabled={loading} className={`${btn.primary} press w-full py-2.5`}>
+        <button
+          type="submit"
+          disabled={loading}
+          className="press mt-1 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-primary-500 to-primary-700 py-3.5 text-sm font-bold text-white shadow-lg shadow-primary-600/25 transition hover:from-primary-400 hover:to-primary-600 disabled:opacity-60"
+        >
           {loading ? "Creating account…" : "Create account"}
           {!loading && <Icon name="chevron-right" size="md" />}
         </button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-slate-500">
+      <p className="mt-7 text-center text-sm text-slate-500">
         Already have an account?{" "}
-        <Link href="/login" className="font-semibold text-primary-600 hover:underline">
+        <Link href="/login" className="font-bold text-primary-600 hover:text-primary-700 hover:underline">
           Sign in
         </Link>
       </p>
-      <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-center text-xs leading-relaxed text-slate-400">
-        After registering, an administrator approves your account before you
-        can sign in. You&apos;ll be notified of the decision.
-      </p>
+      <div className="mt-5 flex items-start gap-2.5 rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+        <Icon name="shield" size="md" className="mt-0.5 shrink-0 text-slate-400" />
+        <p className="text-left text-xs leading-relaxed text-slate-500">
+          After registering, an administrator approves your account before you
+          can sign in. You&apos;ll be notified of the decision.
+        </p>
+      </div>
     </div>
   );
 }
