@@ -2,11 +2,16 @@
  * One-off smoke test: reproduce the side-by-side BEFORE|AFTER composition
  * from lib/facebook.ts against the REAL photos of a report, and write the
  * result to a temp file. Verifies both storage download paths (Cloudinary
- * + Supabase) and the jimp compositing — no Facebook call is made.
+ * + Supabase) and the sharp compositing — no Facebook call is made.
+ *
+ * The label bands are re-rendered here from the same SVG source that
+ * produced the base64 PNGs embedded in lib/facebook.ts, so the output
+ * matches what the live pipeline builds.
  *
  * Usage: node scripts/test-sidebyside.mjs RPT-064D7E59
  */
 import { readFileSync, writeFileSync } from "node:fs";
+import sharp from "sharp";
 
 const env = Object.fromEntries(
   readFileSync(new URL("../.env.local", import.meta.url), "utf8")
@@ -34,29 +39,19 @@ const headers = { apikey: key, Authorization: `Bearer ${key}` };
 const SIDE = 800;
 const PAD = 20;
 const LABEL_H = 72;
-const LABEL_FONT_SIZE = 64;
-const LABEL_BG = 0x2333a0ff;
+const PHOTO_JPEG = { quality: 82 };
 
-const { createRequire } = await import("node:module");
-const require = createRequire(import.meta.url);
-const Jimp = require("jimp");
-const sharp = require("sharp");
-
-// same decode safety net as lib/facebook.ts — jimp cannot read WebP/HEIC
-function isJimpDecodable(b) {
-  if (b.length < 12) return false;
-  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true;
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true;
-  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return true;
-  if (b[0] === 0x42 && b[1] === 0x4d) return true;
-  if ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2a) || (b[0] === 0x4d && b[1] === 0x4d && b[3] === 0x2a)) return true;
-  return false;
-}
-
-async function ensureDecodable(bytes) {
-  if (isJimpDecodable(bytes)) return bytes;
-  console.log("converting non-jimp format (WebP/HEIC) to JPEG via sharp");
-  return sharp(bytes).jpeg({ quality: 90 }).toBuffer();
+/** Same SVG source that generated the embedded label PNGs. */
+async function labelBuffer(text) {
+  const svg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${SIDE}" height="${LABEL_H}">` +
+      `<rect width="100%" height="100%" fill="#2333a0"/>` +
+      `<text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" ` +
+      `font-family="DejaVu Sans, Arial, Helvetica, sans-serif" font-size="40" ` +
+      `font-weight="bold" letter-spacing="6" fill="#ffffff">${text}</text>` +
+    `</svg>`
+  );
+  return sharp(svg).png().toBuffer();
 }
 
 async function loadPhotoBytes(storagePath) {
@@ -73,7 +68,7 @@ async function loadPhotoBytes(storagePath) {
     { headers }
   );
   if (!res.ok) throw new Error(`Supabase download ${res.status}`);
-  return ensureDecodable(Buffer.from(await res.arrayBuffer()));
+  return Buffer.from(await res.arrayBuffer());
 }
 
 const { data: report } = await fetch(
@@ -108,34 +103,27 @@ const [beforeBytes, afterBytes] = await Promise.all([
 ]);
 console.log(`downloaded: before=${beforeBytes.length}B after=${afterBytes.length}B in ${Date.now() - t0}ms`);
 
-const [beforeImg, afterImg, font] = await Promise.all([
-  Jimp.read(beforeBytes),
-  Jimp.read(afterBytes),
-  Jimp.loadFont(Jimp.FONT_SANS_64_WHITE),
+const [left, right, beforeLabel, afterLabel] = await Promise.all([
+  sharp(beforeBytes).resize(SIDE, SIDE, { fit: "cover" }).jpeg(PHOTO_JPEG).toBuffer(),
+  sharp(afterBytes).resize(SIDE, SIDE, { fit: "cover" }).jpeg(PHOTO_JPEG).toBuffer(),
+  labelBuffer("BEFORE"),
+  labelBuffer("AFTER"),
 ]);
 
 const W = PAD + SIDE + PAD + SIDE + PAD;
 const H = PAD + LABEL_H + SIDE + PAD;
-const canvas = new Jimp(W, H, 0xffffffff);
+const out = await sharp({
+  create: { width: W, height: H, channels: 3, background: { r: 255, g: 255, b: 255 } },
+})
+  .composite([
+    { input: beforeLabel, left: PAD, top: PAD },
+    { input: afterLabel, left: PAD + SIDE + PAD, top: PAD },
+    { input: left, left: PAD, top: PAD + LABEL_H },
+    { input: right, left: PAD + SIDE + PAD, top: PAD + LABEL_H },
+  ])
+  .jpeg(PHOTO_JPEG)
+  .toBuffer();
 
-const label = (text, x) => {
-  for (let y = PAD; y < PAD + LABEL_H; y++) {
-    for (let px = x; px < x + SIDE; px++) canvas.setPixelColor(LABEL_BG, px, y);
-  }
-  const w = Jimp.measureText(font, text);
-  canvas.print(font, x + Math.round((SIDE - w) / 2), PAD + Math.round((LABEL_H - LABEL_FONT_SIZE) / 2), text);
-};
-
-const leftX = PAD;
-const rightX = PAD + SIDE + PAD;
-const photoY = PAD + LABEL_H;
-
-canvas.composite(beforeImg.clone().cover(SIDE, SIDE), leftX, photoY);
-canvas.composite(afterImg.clone().cover(SIDE, SIDE), rightX, photoY);
-label("BEFORE", leftX);
-label("AFTER", rightX);
-
-const out = await canvas.quality(80).getBufferAsync(Jimp.MIME_JPEG);
 const outPath = new URL("../.sidebyside-test.jpg", import.meta.url);
 writeFileSync(outPath, out);
 console.log(`COMPOSED: ${W}x${H}, ${(out.length / 1024).toFixed(0)} KB, ${Date.now() - t0}ms total`);

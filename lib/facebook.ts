@@ -12,13 +12,14 @@
  *   - Preferred format: both photos are composited server-side into ONE
  *     side-by-side image (BEFORE | AFTER, labeled) and published as a single
  *     photo post with the caption — Facebook renders it as one clean card.
- *     Composition uses jimp (pure JS, already a dependency) and falls back
- *     to the older album-style multi-photo attach when decoding fails.
+ *     Composition uses sharp with PRE-RENDERED label bands embedded in the
+ *     bundle (no runtime font files — serverless bundles drop those, which
+ *     silently broke the labeled posts before). Falls back to individually
+ *     labeled photos attached as one album-style post.
  *   - Everything is best-effort: a Facebook outage or bad token must never
  *     block the admin's approve action.
  */
 
-import Jimp from "jimp";
 import sharp from "sharp";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -118,14 +119,14 @@ function formatDateTime(iso: string | null | undefined): string | null {
 
 /**
  * Build the public caption in the formal register of a municipal page:
- * a public-advisory heading, what was resolved and where, the situation
- * as reported by the citizen, and the exact date AND time (Asia/Manila)
- * the report was received and resolved.
+ * a public-advisory heading, what was resolved and where, and the exact
+ * date AND time (Asia/Manila) the report was received and resolved.
+ * Deliberately does NOT quote the report description — internal remarks
+ * stay out of the public post.
  */
 function buildCaption(input: {
   refCode: string;
   title: string;
-  description: string | null;
   categoryName: string | null;
   barangayName: string | null;
   reportedAt: string | null;
@@ -133,13 +134,6 @@ function buildCaption(input: {
 }): string {
   const brgy = input.barangayName?.replace(/^Barangay\s+/i, "") ?? null;
   const whereLine = brgy ? `Brgy. ${brgy}, Sta. Cruz, Laguna` : "Sta. Cruz, Laguna";
-
-  const situation = (input.description ?? "").trim().replace(/\s+/g, " ");
-  const situationLine = situation
-    ? situation.length > 280
-      ? `${situation.slice(0, 280).trimEnd()}…`
-      : situation
-    : null;
 
   const reported = formatDateTime(input.reportedAt);
   const resolved = formatDateTime(input.resolvedAt);
@@ -153,7 +147,6 @@ function buildCaption(input: {
     `📍 ${whereLine}`,
   ];
   if (input.categoryName) lines.push(`🗂️ Concern: ${input.categoryName}`);
-  if (situationLine) lines.push("", `💬 "${situationLine}"`);
   if (reported || resolved) {
     lines.push("");
     if (reported) lines.push(`🗓️ Date Reported: ${reported}`);
@@ -175,49 +168,31 @@ function buildCaption(input: {
 /** Side-by-side layout constants (Facebook renders large photos well up to ~2048px). */
 const SIDE = 800; // each photo scaled to 800×800 (cover)
 const PAD = 20; // margins + gap between the two photos
-const LABEL_H = 72; // blue label band above each photo (fits the 64px font)
-const LABEL_FONT_SIZE = 64; // jimp's bundled SANS_64 bitmap font
-const LABEL_BG = 0x2333a0ff; // SCOUT blue
+const LABEL_H = 72; // blue label band above each photo
+const PHOTO_JPEG = { quality: 82 } as const;
 
 /**
- * jimp (v0.22) decodes JPEG/PNG/BMP/GIF/TIFF only. Completion photos can
- * be WebP (small originals skip client-side recompression) and camera
- * originals can be HEIC — either makes Jimp.read throw, silently dropping
- * the labeled composite. Sniff the magic bytes and convert anything else
- * to JPEG with sharp first.
+ * Pre-rendered 800×72 label bands, embedded as base64 PNG so they ship
+ * inside the serverless bundle. (Text rendering with runtime font files
+ * broke on Vercel — node_modules assets the bundler doesn't trace are
+ * absent at runtime, so every labeled post silently fell back to plain
+ * photos.) The bands were generated with sharp from an SVG source; see
+ * scripts/test-sidebyside.mjs for the same geometry rendered live.
  */
-function isJimpDecodable(b: Buffer): boolean {
-  if (b.length < 12) return false;
-  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true; // JPEG
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true; // PNG
-  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return true; // GIF
-  if (b[0] === 0x42 && b[1] === 0x4d) return true; // BMP
-  if (
-    (b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2a) ||
-    (b[0] === 0x4d && b[1] === 0x4d && b[3] === 0x2a)
-  )
-    return true; // TIFF
-  return false;
-}
+const LABEL_PNGS: Record<"BEFORE" | "AFTER", string> = {
+  BEFORE:
+    "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",
+  AFTER:
+    "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",
+};
 
-/** Convert non-jimp formats (WebP, HEIC, …) to JPEG; returns input on failure. */
-async function ensureDecodable(bytes: Buffer): Promise<Buffer> {
-  if (isJimpDecodable(bytes)) return bytes;
-  try {
-    return await sharp(bytes).jpeg({ quality: 90 }).toBuffer();
-  } catch (e) {
-    console.error(
-      "[facebook] sharp conversion failed:",
-      e instanceof Error ? e.message : e
-    );
-    return bytes;
-  }
+function labelBuffer(text: "BEFORE" | "AFTER"): Buffer {
+  return Buffer.from(LABEL_PNGS[text], "base64");
 }
 
 /**
- * Download a report photo as decodable bytes for compositing.
- *   - "cld:<id>" → Cloudinary CDN (forced to JPG — f_auto could return
- *     WebP, which jimp cannot decode)
+ * Download a report photo as raw bytes for compositing.
+ *   - "cld:<id>" → Cloudinary CDN (forced to JPG — f_auto could return WebP)
  *   - anything else → Supabase Storage via the service role
  * Never throws; null means "skip this photo".
  */
@@ -229,55 +204,12 @@ async function loadPhotoBytes(db: SupabaseClient, storagePath: string): Promise<
       const url = `https://res.cloudinary.com/${cloud}/image/upload/f_jpg,q_auto,w_960/${encodeURIComponent(storagePath.slice(4))}.jpg`;
       const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
       if (!res.ok) return null;
-      return ensureDecodable(Buffer.from(await res.arrayBuffer()));
+      return Buffer.from(await res.arrayBuffer());
     }
     const { data, error } = await db.storage.from("report-photos").download(storagePath);
     if (error || !data) return null;
-    return ensureDecodable(Buffer.from(await data.arrayBuffer()));
+    return Buffer.from(await data.arrayBuffer());
   } catch {
-    return null;
-  }
-}
-
-type BitmapFont = Awaited<ReturnType<typeof Jimp.loadFont>>;
-type JimpImage = InstanceType<typeof Jimp>;
-
-/** Draw the blue band with a centered white label across one photo slot. */
-function drawLabel(canvas: JimpImage, font: BitmapFont, text: string, x: number): void {
-  for (let y = PAD; y < PAD + LABEL_H; y++) {
-    for (let px = x; px < x + SIDE; px++) canvas.setPixelColor(LABEL_BG, px, y);
-  }
-  const w = Jimp.measureText(font, text);
-  canvas.print(
-    font,
-    x + Math.round((SIDE - w) / 2),
-    PAD + Math.round((LABEL_H - LABEL_FONT_SIZE) / 2),
-    text
-  );
-}
-
-/**
- * Stamp the same blue BEFORE/AFTER band onto a SINGLE photo for the
- * album-style fallback, so both photos stay identifiable even when the
- * side-by-side composite can't be built. Returns null on decode failure.
- */
-async function labelSinglePhoto(bytes: Buffer, text: string): Promise<Buffer | null> {
-  try {
-    const [img, font] = await Promise.all([
-      Jimp.read(bytes),
-      Jimp.loadFont(Jimp.FONT_SANS_64_WHITE),
-    ]);
-    const W = PAD + SIDE + PAD;
-    const H = PAD + LABEL_H + SIDE + PAD;
-    const canvas = new Jimp(W, H, 0xffffffff);
-    canvas.composite(img.cover(SIDE, SIDE), PAD, PAD + LABEL_H);
-    drawLabel(canvas, font, text, PAD);
-    return await canvas.quality(80).getBufferAsync(Jimp.MIME_JPEG);
-  } catch (e) {
-    console.error(
-      "[facebook] single-photo labeling failed:",
-      e instanceof Error ? e.message : e
-    );
     return null;
   }
 }
@@ -290,30 +222,57 @@ async function labelSinglePhoto(bytes: Buffer, text: string): Promise<Buffer | n
  */
 async function composeSideBySide(before: Buffer, after: Buffer): Promise<Buffer | null> {
   try {
-    const [beforeImg, afterImg, font] = await Promise.all([
-      Jimp.read(before),
-      Jimp.read(after),
-      Jimp.loadFont(Jimp.FONT_SANS_64_WHITE),
+    const [left, right] = await Promise.all([
+      sharp(before).resize(SIDE, SIDE, { fit: "cover" }).jpeg(PHOTO_JPEG).toBuffer(),
+      sharp(after).resize(SIDE, SIDE, { fit: "cover" }).jpeg(PHOTO_JPEG).toBuffer(),
     ]);
 
     const W = PAD + SIDE + PAD + SIDE + PAD;
     const H = PAD + LABEL_H + SIDE + PAD;
-    const canvas = new Jimp(W, H, 0xffffffff);
 
-    const leftX = PAD;
-    const rightX = PAD + SIDE + PAD;
-    const photoY = PAD + LABEL_H;
-
-    canvas.composite(beforeImg.clone().cover(SIDE, SIDE), leftX, photoY);
-    canvas.composite(afterImg.clone().cover(SIDE, SIDE), rightX, photoY);
-    drawLabel(canvas, font, "BEFORE", leftX);
-    drawLabel(canvas, font, "AFTER", rightX);
-
-    // quality 80 keeps the composite ≈300 KB — Facebook recompresses anyway
-    return await canvas.quality(80).getBufferAsync(Jimp.MIME_JPEG);
+    // quality 82 keeps the composite ≈300 KB — Facebook recompresses anyway
+    return await sharp({
+      create: { width: W, height: H, channels: 3, background: { r: 255, g: 255, b: 255 } },
+    })
+      .composite([
+        { input: labelBuffer("BEFORE"), left: PAD, top: PAD },
+        { input: labelBuffer("AFTER"), left: PAD + SIDE + PAD, top: PAD },
+        { input: left, left: PAD, top: PAD + LABEL_H },
+        { input: right, left: PAD + SIDE + PAD, top: PAD + LABEL_H },
+      ])
+      .jpeg(PHOTO_JPEG)
+      .toBuffer();
   } catch (e) {
     console.error(
       "[facebook] side-by-side composition failed:",
+      e instanceof Error ? e.message : e
+    );
+    return null;
+  }
+}
+
+/**
+ * Stamp the same blue BEFORE/AFTER band onto a SINGLE photo for the
+ * album-style fallback, so both photos stay identifiable even when the
+ * side-by-side composite can't be built. Returns null on decode failure.
+ */
+async function labelSinglePhoto(bytes: Buffer, text: "BEFORE" | "AFTER"): Promise<Buffer | null> {
+  try {
+    const W = PAD + SIDE + PAD;
+    const H = PAD + LABEL_H + SIDE + PAD;
+    const photo = await sharp(bytes).resize(SIDE, SIDE, { fit: "cover" }).jpeg(PHOTO_JPEG).toBuffer();
+    return await sharp({
+      create: { width: W, height: H, channels: 3, background: { r: 255, g: 255, b: 255 } },
+    })
+      .composite([
+        { input: labelBuffer(text), left: PAD, top: PAD },
+        { input: photo, left: PAD, top: PAD + LABEL_H },
+      ])
+      .jpeg(PHOTO_JPEG)
+      .toBuffer();
+  } catch (e) {
+    console.error(
+      "[facebook] single-photo labeling failed:",
       e instanceof Error ? e.message : e
     );
     return null;
@@ -327,10 +286,10 @@ async function composeSideBySide(before: Buffer, after: Buffer): Promise<Buffer 
  * `published: false` uploads a hidden photo whose id can be attached to a
  * feed post with attached_media.
  */
-async function graphUploadPhoto(
+async function graphUploadPhotoOnce(
   pageId: string,
   jpeg: Buffer,
-  opts: { caption?: string; published?: boolean } = {}
+  opts: { caption?: string; published?: boolean }
 ): Promise<string> {
   const form = new FormData();
   form.append("access_token", process.env.FACEBOOK_PAGE_ACCESS_TOKEN ?? "");
@@ -355,19 +314,44 @@ async function graphUploadPhoto(
 }
 
 /**
+ * Upload with retries — Graph occasionally 4xx/5xx-transiently drops one
+ * photo of a pair, which is how the BEFORE photo went missing from a live
+ * post. Backs off 1s, 2s before giving up on the photo.
+ */
+async function graphUploadPhoto(
+  pageId: string,
+  jpeg: Buffer,
+  opts: { caption?: string; published?: boolean } = {}
+): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await graphUploadPhotoOnce(pageId, jpeg, opts);
+    } catch (e) {
+      lastErr = e;
+      console.warn(
+        `[facebook] photo upload attempt ${attempt}/3 failed:`,
+        e instanceof Error ? e.message : e
+      );
+      if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 1000));
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Publish a resolved report to the Page.
  *
  * Format: ONE side-by-side BEFORE | AFTER image as a single photo post with
- * a caption carrying the situation (from the report description), the dates
- * reported/resolved, and the ref code. Falls back to the older album-style
- * multi-photo attach when composition fails, a plain photo when only one
- * photo exists, and a text-only status when there are none. Returns the
- * post id.
+ * the formal advisory caption (dates + times, ref code — no quoted remarks).
+ * Falls back to an album-style post of individually labeled photos when
+ * composition fails, and to unlabeled photos when even labeling fails.
+ * Every photo gets three upload attempts before it may be skipped. Returns
+ * the post id.
  */
 export async function postResolvedReportToFacebook(input: {
   refCode: string;
   title: string;
-  description: string | null;
   categoryName: string | null;
   barangayName: string | null;
   reportedAt: string | null;
@@ -381,9 +365,6 @@ export async function postResolvedReportToFacebook(input: {
   const pageId = process.env.FACEBOOK_PAGE_ID as string;
   const caption = buildCaption(input);
   const db = createAdminClient();
-  const origin = appOrigin();
-  const photoUrl = (path: string, width: 640 | 960) =>
-    `${origin}/api/photo?bucket=report-photos&path=${encodeURIComponent(path)}&w=${width}`;
 
   try {
     /* ---- preferred: one labeled BEFORE | AFTER image ---- */
@@ -405,55 +386,40 @@ export async function postResolvedReportToFacebook(input: {
       );
     }
 
-    /* ---- fallback: album-style multi-photo attach ---- */
+    /* ---- fallback: album-style multi-photo attach, BEFORE first ---- */
     const photoIds: string[] = [];
 
-    // Upload each photo unpublished (stamped BEFORE/AFTER when we can
-    // decode it), then attach all of them to one feed post. A single
-    // broken photo must not drop the whole album — tolerate per-photo
-    // failure and post with whatever made it through.
-    const tryPhoto = async (path: string | null, label: string) => {
+    // Label each photo when it can be decoded; otherwise upload the raw
+    // bytes unlabeled (Facebook decodes formats sharp may not). A photo is
+    // only ever skipped after three failed upload attempts.
+    const tryPhoto = async (path: string | null, label: "BEFORE" | "AFTER") => {
       if (!path) return;
-      // Preferred: download the bytes and stamp the label onto the photo
-      // itself, so the album post reads like the composite one.
       const bytes = await loadPhotoBytes(db, path);
-      if (bytes) {
-        const labeled = await labelSinglePhoto(bytes, label);
-        if (labeled) {
-          try {
-            const photoId = await graphUploadPhoto(pageId, labeled, { published: false });
-            photoIds.push(photoId);
-            return;
-          } catch (e) {
-            console.error(
-              `[facebook] labeled ${label} upload failed:`,
-              e instanceof Error ? e.message : e
-            );
-          }
-        }
+      if (!bytes) {
+        console.error(`[facebook] ${label} photo download failed (${path}) — skipped`);
+        return;
       }
-      // Last resort: let Facebook fetch the public URL (unlabeled).
-      const url = photoUrl(path, 960);
+      const labeled = await labelSinglePhoto(bytes, label);
       try {
-        const res = await graph<{ id: string }>("/me/photos", {
-          url,
-          published: "false",
-        });
-        if (res?.id) photoIds.push(res.id);
+        const photoId = await graphUploadPhoto(pageId, labeled ?? bytes, { published: false });
+        photoIds.push(photoId);
+        if (!labeled) {
+          console.warn(`[facebook] ${label} photo posted unlabeled (decode failed)`);
+        }
       } catch (e) {
         console.error(
-          `[facebook] ${label} photo upload failed (${url}):`,
+          `[facebook] ${label} photo upload failed after retries:`,
           e instanceof Error ? e.message : e
         );
       }
     };
 
-    await tryPhoto(input.photoAfterPath, "AFTER");
     await tryPhoto(input.photoBeforePath, "BEFORE");
+    await tryPhoto(input.photoAfterPath, "AFTER");
 
     let postId: string | undefined;
     if (photoIds.length > 0) {
-      // one album-style post carrying all the photos (After first)
+      // one album-style post carrying all the photos (Before first)
       const res = await graph<{ id: string }>("/me/feed", {
         message: caption,
         ...Object.fromEntries(
