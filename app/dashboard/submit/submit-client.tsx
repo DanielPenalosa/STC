@@ -1108,11 +1108,20 @@ export default function SubmitReportClient({
                   {coords ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : "—"}
                 </DetailRow>
                 <DetailRow label="Assigned to">
-                  {ai.office
-                    ? `${ai.office} (suggested)`
-                    : ai.level === "municipal"
-                      ? "Municipal office (suggested)"
-                      : "Barangay office (suggested)"}
+                  {detection.phase === "detected" && ai.level !== "municipal" ? (
+                    // GPS already resolved the barangay — this is where the
+                    // report WILL go the moment it's submitted (auto-assigned)
+                    <>
+                      {detection.label} — auto-assigned{" "}
+                      <Icon name="check" size="sm" className="inline text-success-500" strokeWidth={3} />
+                    </>
+                  ) : ai.office ? (
+                    ai.office
+                  ) : ai.level === "municipal" ? (
+                    "Municipal office"
+                  ) : (
+                    "Responsible office"
+                  )}
                 </DetailRow>
                 <DetailRow label="Severity">
                   <span
