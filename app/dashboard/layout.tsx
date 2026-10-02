@@ -9,8 +9,7 @@ import type { Role } from "@/lib/constants";
 import { DashboardNav } from "@/components/dashboard-nav";
 import { PageTransition } from "@/components/page-transition";
 import { MobileNav } from "@/components/mobile-nav";
-import { Icon } from "@/components/icons";
-import type { IconName } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
 
 /* ------------------------- nav definitions per role ------------------------- */
 
@@ -139,7 +138,11 @@ export default async function DashboardLayout({
               </span>
             </div>
             <form action="/auth/signout" method="post">
-              <button className="w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-red-300 transition hover:bg-white/10 hover:text-red-200">
+              <button
+                type="submit"
+                className="press flex w-full items-center justify-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-500/20 hover:text-red-100"
+              >
+                <Icon name="logout" size="md" />
                 Sign out
               </button>
             </form>

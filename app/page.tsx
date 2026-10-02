@@ -79,7 +79,15 @@ export default async function Landing() {
   // section renders nothing when there's nothing resolved yet.
   const { items: resolved } = await getResolvedReports(6);
   return (
-    <main className="landing-fade flex min-h-screen flex-col bg-surface">
+    <main
+      className="landing-fade flex min-h-screen flex-col bg-surface bg-cover bg-center bg-fixed"
+      style={{
+        // Santa Cruz Town Hall photo as the page backdrop, veiled in white so
+        // every section keeps its original look and all text stays readable.
+        backgroundImage:
+          "linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)), url('/town-hall.webp')",
+      }}
+    >
       {/* ================= header — navy like the admin shell ================= */}
       <header className="safe-top sticky top-0 z-40 border-b border-white/10 bg-navy bg-cover bg-center backdrop-blur-md" style={{ backgroundImage: "url('/blue-bg.jpg')" }}>
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-5">
