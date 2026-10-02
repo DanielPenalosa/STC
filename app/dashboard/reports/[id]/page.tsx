@@ -10,6 +10,7 @@ import type { Report, ReportPhoto, Assignment, AiAnalysis } from "@/lib/types";
 import ProcessBar from "./process-bar";
 import ReportActions from "./actions";
 import HeaderActions from "./header-actions";
+import AiRoutingBanner from "./ai-routing-banner";
 import AiCard from "./ai-card";
 import ActivityLog from "./timeline";
 import DuplicatesCard from "./duplicates-card";
@@ -313,6 +314,9 @@ export default async function ReportDetailPage({
           )}
         </div>
       </div>
+
+      {/* AI auto-assignment in flight (right after submission) */}
+      {report.status === "submitted" && <AiRoutingBanner />}
 
       {/* locked banner */}
       {isLocked && (

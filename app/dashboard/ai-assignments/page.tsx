@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import RouteNowButton from "./route-now-button";
 import { Card, PageHeader, EmptyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { CONFIDENCE_THRESHOLD } from "@/lib/constants";
@@ -160,11 +161,13 @@ export default async function AiAutoAssignmentPage() {
                           : " — waiting for the unit to accept."}
                       </p>
                     ) : (
-                      <p className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-warn-50 px-2.5 py-1.5 text-xs font-semibold text-warn-700">
-                        <Icon name="alert" size="sm" />
-                        No responsible unit could be resolved — open the report and use
-                        &ldquo;Re-run AI check&rdquo;.
-                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <p className="flex flex-wrap items-center gap-1.5 rounded-lg bg-warn-50 px-2.5 py-1.5 text-xs font-semibold text-warn-700">
+                          <Icon name="alert" size="sm" />
+                          Not routed — the pipeline was interrupted before it could assign a unit.
+                        </p>
+                        {row.report_id && <RouteNowButton reportId={row.report_id} />}
+                      </div>
                     )}
                     <p className="mt-1 text-xs text-slate-500">
                       {row.reports?.categories?.name ?? "no category"} · {row.reports?.departments?.name ?? "no department"} · {row.reports?.barangays?.name ?? "no barangay"} · model {row.model_used}

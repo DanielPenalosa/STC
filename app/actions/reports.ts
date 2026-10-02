@@ -4,11 +4,10 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireProfile } from "@/lib/data";
-import { runAiAnalysis } from "@/lib/ai";
 import { resolveBarangay } from "@/lib/detect-server";
 import { publicPhotoUrl } from "@/lib/photo";
+import { schedulePostSubmissionTasks } from "./_post_submission";
 import {
-  detectDuplicates,
   photoSignal,
   textSignal,
   locationSignal,
@@ -333,7 +332,10 @@ export async function createReport(
           model_used: v.model_used.slice(0, 120),
         }
       : null;
-  void runAiAnalysis(reportId, clientVerdict);
+  // AI analysis + auto-assignment and duplicate detection now run inside
+  // next/server after() — see _post_submission.ts for why (floating promises
+  // were killed on Vercel before they could finish, so reports never got
+  // auto-assigned)
 
   // the citizen was warned about an existing report and chose to file —
   // record it so admins see the deliberate duplicate instead of an accident
@@ -361,16 +363,19 @@ export async function createReport(
     );
   }
 
-  // fire-and-forget duplicate detection — flags the report + notifies admins
-  // when it looks like a copy; never blocks the submission
-  void detectDuplicates(supabase, reportId, {
-    title: input.title,
-    description: input.description,
-    categoryId: input.categoryId,
-    latitude: input.latitude,
-    longitude: input.longitude,
-    barangayId,
-    photoHashes: input.photoHashes ?? [],
+  schedulePostSubmissionTasks({
+    supabase,
+    reportId,
+    clientVerdict,
+    duplicateFacts: {
+      title: input.title,
+      description: input.description,
+      categoryId: input.categoryId,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      barangayId,
+      photoHashes: input.photoHashes ?? [],
+    },
   });
 
   revalidatePath("/dashboard");
