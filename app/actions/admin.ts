@@ -134,7 +134,7 @@ async function publishToFacebook(reportId: string): Promise<void> {
     const { data: report } = await db
       .from("reports")
       .select(
-        `id, ref_code, title, resolved_at, categories(name), barangays(name),
+        `id, ref_code, title, description, created_at, resolved_at, categories(name), barangays(name),
          report_photos(storage_path, kind, created_at)`
       )
       .eq("id", reportId)
@@ -143,6 +143,8 @@ async function publishToFacebook(reportId: string): Promise<void> {
       | {
           ref_code: string;
           title: string;
+          description: string;
+          created_at: string;
           resolved_at: string | null;
           categories: { name: string } | null;
           barangays: { name: string } | null;
@@ -154,8 +156,10 @@ async function publishToFacebook(reportId: string): Promise<void> {
     await postResolvedReportToFacebook({
       refCode: r.ref_code,
       title: r.title,
+      description: r.description ?? null,
       categoryName: r.categories?.name ?? null,
       barangayName: r.barangays?.name ?? null,
+      reportedAt: r.created_at,
       resolvedAt: r.resolved_at,
       photoBeforePath: sorted.find((p) => p.kind === "citizen")?.storage_path ?? null,
       photoAfterPath: sorted.find((p) => p.kind === "resolution")?.storage_path ?? null,

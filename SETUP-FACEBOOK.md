@@ -169,16 +169,25 @@ the posts waits for approval.
 ## What gets posted
 
 ```
-✅ RESOLVED — Broken streetlight along Rizal Ave in Brgy. Gatid
+✅ RESOLVED — Broken streetlight along Rizal Ave
+📍 Brgy. Gatid · Electricity & Utilities
 
-Ref: RPT-0042 · Reported through SCOUT (Electricity & Utilities)
-Before → After: the issue as reported, and the site after the fix.
+The streetlight at the corner of Rizal Ave has been flickering and
+completely dark at night for two weeks, making the sidewalk unsafe.
 
+📅 Reported: Sep 28, 2026
+🛠️ Resolved: Oct 2, 2026
+
+Ref: RPT-0042 · SCOUT — Sta. Cruz Community Observation and Unified Triage
 #SCOUT #StaCruzLaguna #Transparency
 ```
 
-- Both photos ride in **one album-style post** (After listed first).
-- If a report has no photos, a plain text post is published instead.
+- The **image** is ONE side-by-side photo: BEFORE (left) and AFTER (right),
+  each with a blue SCOUT label band — rendered by Facebook as a single card.
+- The **caption** carries the report description (the situation), the dates
+  reported and resolved, the barangay, category, and ref code.
+- If composition fails, the older album-style post (both photos attached)
+  is used; with one photo a plain photo posts; with none, a text status.
 - Posting never blocks or fails the admin's approval action — errors are
   logged server-side only.
 
