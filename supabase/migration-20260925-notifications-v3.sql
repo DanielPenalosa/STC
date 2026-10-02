@@ -109,12 +109,17 @@ begin
   end if;
 
   -- 2b. all admins: a report was routed
+  --     NOTE: the barangay alias here is `br` (the admins query joins
+  --     departments d + barangays br). Referencing `b.name` here made the
+  --     whole function fail at runtime with
+  --     "42P01 missing FROM-clause entry for table b", which rolled back
+  --     EVERY assignment insert — no report was ever auto-assigned.
   if v_admins > 0 then
     insert into public.notifications (user_id, report_id, title, body, type)
     select a.id, r.id,
            'Report auto-assigned — ' || r.ref_code,
            '"' || r.title || '"' ||
-             coalesce(' in Brgy. ' || b.name, '') ||
+             coalesce(' in Brgy. ' || br.name, '') ||
              ' was routed to ' ||
              coalesce(d.name, br.name, 'a unit') || '.',
            'auto_assigned'
