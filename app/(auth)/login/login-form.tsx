@@ -145,13 +145,12 @@ export default function LoginForm() {
         <div>
           <div className="flex items-end justify-between">
             <label className={label} htmlFor="password">Password</label>
-            <button
-              type="button"
-              onClick={() => setShowPw((s) => !s)}
-              className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-primary-600 hover:text-primary-700"
+            <Link
+              href="/forgot-password"
+              className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 transition hover:text-primary-600"
             >
-              {showPw ? "Hide" : "Show"}
-            </button>
+              Forgot password?
+            </Link>
           </div>
           <div className={inputShell}>
             <Icon name="lock" size="md" className="shrink-0 text-slate-400 transition-colors group-focus-within:text-primary-500" />

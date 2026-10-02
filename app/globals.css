@@ -61,6 +61,13 @@ body {
   overflow: hidden;
 }
 
+/* remove the browser's built-in password-reveal eye (Edge/IE) — the app has
+   its own toggle inside the field, and two eyes look like a bug */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
 /* hide horizontal scrollbars on filter pill rows while keeping scroll */
 .scrollbar-none {
   -ms-overflow-style: none;
