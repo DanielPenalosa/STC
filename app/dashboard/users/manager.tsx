@@ -247,7 +247,7 @@ export default function UserManager({
           <p className="mt-1 font-bold">What type of account do you want to create?</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {([
-              { key: "department", icon: "building", title: "Department", desc: "An office that processes reports assigned to it — engineering, water, utilities…" },
+              { key: "department", icon: "building", title: "Department", desc: "An office that processes reports assigned to it — Engineering Office or MENRO" },
               { key: "barangay", icon: "home", title: "Barangay", desc: "A barangay hall that handles reports within its jurisdiction." },
               { key: "admin", icon: "shield", title: "Administrator", desc: "Full system oversight — approvals, assignments, AI review, settings." },
             ] as const).map((opt) => (

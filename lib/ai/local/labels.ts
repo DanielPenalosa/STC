@@ -185,7 +185,13 @@ export const URGENCY_KEYWORDS: {
   { words: ["blocked", "cannot pass", "trapped", "stranded", "harang", "hindi makadaan", "naipit", "nastranded"], level: "high" },
 ];
 
-/** Department-routing keywords (used for municipal-level reports). */
+/**
+ * Department-routing keywords (used for municipal-level reports).
+ *
+ * Only two departments exist: Engineering Office and MENRO (the default).
+ * Engineering keywords are checked first; everything else municipal
+ * falls through to MENRO.
+ */
 export const DEPARTMENT_KEYWORDS: {
   patterns: RegExp[];
   departmentSlug: string;
@@ -196,20 +202,13 @@ export const DEPARTMENT_KEYWORDS: {
     patterns: [/road/i, /pothole/i, /bridge/i, /drainage/i, /sidewalk/i, /flood control/i, /canal/i],
   },
   {
-    departmentSlug: "environment",
-    patterns: [/garbage/i, /trash/i, /waste/i, /dumping/i, /tree/i, /estero/i, /pollution/i, /sewage/i],
-  },
-  {
-    // Disaster risk reduction
-    departmentSlug: "disaster",
-    patterns: [/flood/i, /landslide/i, /typhoon/i, /storm/i, /earthquake/i, /evacuat/i, /raging/i, /emergency/i],
-  },
-  {
-    departmentSlug: "utilities",
-    patterns: [/water/i, /pipe/i, /leak/i, /electric/i, /power/i, /streetlight/i, /post/i, /wire/i, /brownout/i],
-  },
-  {
-    departmentSlug: "public-safety",
-    patterns: [/stray/i, /dog/i, /danger/i, /safety/i, /signal/i, /traffic/i, /sign/i, /crime/i],
+    // MENRO — the default department: environment, waste, utilities, safety
+    departmentSlug: "menro",
+    patterns: [
+      /garbage/i, /trash/i, /waste/i, /dumping/i, /tree/i, /estero/i, /pollution/i, /sewage/i,
+      /flood/i, /landslide/i, /typhoon/i, /storm/i, /earthquake/i, /evacuat/i, /raging/i, /emergency/i,
+      /water/i, /pipe/i, /leak/i, /electric/i, /power/i, /streetlight/i, /post/i, /wire/i, /brownout/i,
+      /stray/i, /dog/i, /danger/i, /safety/i, /signal/i, /traffic/i, /sign/i, /crime/i,
+    ],
   },
 ];

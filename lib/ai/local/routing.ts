@@ -21,12 +21,15 @@ export type RoutingDecision = {
   departmentHint: string | null;
 };
 
-/** Issues that are almost always municipal responsibilities. */
+/**
+ * Issues that are almost always municipal responsibilities.
+ * Only two departments exist: engineering and MENRO (the default).
+ */
 const MUNICIPAL_SIGNALS: { pattern: RegExp; why: string; hint: string }[] = [
-  { pattern: /exposed_wires|traffic_signal|water_leak/, why: "utility infrastructure", hint: "utilities" },
-  { pattern: /flooding/, why: "flood response", hint: "disaster" },
+  { pattern: /exposed_wires|traffic_signal|water_leak/, why: "utility infrastructure", hint: "menro" },
+  { pattern: /flooding/, why: "flood response", hint: "menro" },
   { pattern: /road_damage/, why: "road infrastructure", hint: "engineering" },
-  { pattern: /fallen_tree/, why: "heavy debris clearing", hint: "environment" },
+  { pattern: /fallen_tree/, why: "heavy debris clearing", hint: "menro" },
 ];
 
 /** Issues that are typically handled at barangay level. */

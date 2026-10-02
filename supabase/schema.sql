@@ -712,13 +712,20 @@ insert into public.categories (name, slug, description, color, icon) values
   ('Other',                     'other',               'Anything that does not fit above', '#64748b', '📋')
 on conflict (slug) do nothing;
 
+-- Exactly two departments: Engineering Office and MENRO (the default).
 insert into public.departments (name, slug, description, color) values
-  ('Engineering Office',        'engineering',      'Roads, infrastructure and public works', '#F5E606'),
-  ('Water & Sanitation Office', 'water-sanitation', 'Water systems and sanitation services',  '#06ABEA'),
-  ('Utilities Office',          'utilities',        'Electricity and utility coordination',   '#2333A0'),
-  ('Environment Office',        'environment',      'Environmental protection and cleanliness','#2E8254'),
-  ('Public Safety Office',      'public-safety',    'Safety, hazards and emergency response', '#DF1B2C')
+  ('Engineering Office', 'engineering', 'Roads, infrastructure and public works', '#F5E606'),
+  ('Municipal Environment and Natural Resources Officer (MENRO)', 'menro',
+   'Environmental protection, sanitation, waste management and natural resources', '#2E8254')
 on conflict (slug) do nothing;
+
+-- AI routing defaults per category: infrastructure → Engineering Office,
+-- everything else → MENRO (the default department).
+update public.categories c
+set default_department_id = d.id
+from public.departments d
+where (c.slug = 'infrastructure' and d.slug = 'engineering')
+   or (c.slug <> 'infrastructure' and d.slug = 'menro');
 
 -- The 26 official barangays of Sta. Cruz, Laguna with OpenStreetMap
 -- boundary-centroid coordinates (so GPS detection works out of the box).

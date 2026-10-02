@@ -57,11 +57,8 @@ const ANALYZE_STEPS: { label: string }[] = [
 
 /** Office display names for the "Assigned to" row, by department slug hint. */
 const OFFICE_NAMES: Record<string, string> = {
-  environment: "MENRO",
-  disaster: "MDRRMO",
+  menro: "MENRO",
   engineering: "Engineering Office",
-  utilities: "Utilities Office",
-  "public-safety": "Public Safety Office",
 };
 
 const URGENCY_CHIP: Record<string, string> = {
