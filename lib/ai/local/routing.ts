@@ -4,8 +4,9 @@
  * Rule-based and admin-configurable (accountability > cleverness):
  *   1. each category row carries handling_level ('barangay'|'municipal')
  *      — admins control the default per category
- *   2. keyword overrides catch clear municipal signals (power lines, major
- *      flooding, roads) and barangay-scale signals (litter, vandalism)
+ *   2. issue-type overrides catch clear municipal signals (power lines,
+ *      major flooding, roads) and clear barangay-scale signals (litter,
+ *      vandalism, stray animals) — both beat the category default
  *   3. municipal reports are routed to the department configured on the
  *      category (default_department_id), refined by keyword hints
  */
@@ -55,22 +56,31 @@ export function routeReport(input: {
   let level: HandlingLevel | null = input.categoryHandling ?? null;
   if (level) reasons.push(`category default: ${level}`);
 
-  // 2. municipal issue signals
+  // 2. issue-type signals — these OVERRIDE the category default:
+  //    a pothole is municipal even under a barangay-coded category, and a
+  //    garbage pile is the barangay's job even when the category default
+  //    says municipal (that default was a blanket migration value, not an
+  //    admin policy). Municipal signals are checked first so utility/road
+  //    issues can never fall to the barangay.
   let hint: string | null = null;
   if (input.issueKey) {
+    let municipalSignal = false;
     for (const sig of MUNICIPAL_SIGNALS) {
       if (sig.pattern.test(input.issueKey)) {
         level = "municipal";
         hint = sig.hint;
+        municipalSignal = true;
         reasons.push(`${sig.why} is a municipal responsibility`);
         break;
       }
     }
-    for (const sig of BARANGAY_SIGNALS) {
-      if (sig.pattern.test(input.issueKey)) {
-        if (!level) level = "barangay";
-        reasons.push(`${sig.why} is usually handled by the barangay`);
-        break;
+    if (!municipalSignal) {
+      for (const sig of BARANGAY_SIGNALS) {
+        if (sig.pattern.test(input.issueKey)) {
+          level = "barangay";
+          reasons.push(`${sig.why} is usually handled by the barangay`);
+          break;
+        }
       }
     }
   }
