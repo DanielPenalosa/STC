@@ -63,7 +63,9 @@ export default function MapPicker({
             : "Couldn't get a GPS fix. Move somewhere with a clear view of the sky and try again, or tap the map."
         );
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      // maximumAge lets the browser answer with its cached fix instantly
+      // instead of re-locking GPS from scratch on every tap
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
     );
   }
 

@@ -207,6 +207,8 @@ export default function SubmitReportClient({
   const aiIssueRef = useRef<string | null>(null);
   /** hidden file input — focused programmatically by "Replace photo" */
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** cancels the in-flight GPS attempt — set by startGpsDetection */
+  const gpsCancelRef = useRef<(() => void) | null>(null);
 
   /** keep detectionRef in sync so async flows can read the latest phase */
   function setDetection(d: DetectionState) {
@@ -258,6 +260,15 @@ export default function SubmitReportClient({
   useEffect(() => {
     preloadBrowserModel();
     preloadEmbedder(); // used by the duplicate check (image similarity)
+  }, []);
+
+  // stop any in-flight GPS attempt on unmount (route change) — otherwise
+  // its callbacks keep firing on a dead component
+  useEffect(() => {
+    return () => {
+      gpsCancelRef.current?.();
+      gpsCancelRef.current = null;
+    };
   }, []);
 
   /**
@@ -558,6 +569,12 @@ export default function SubmitReportClient({
     return out;
   }
 
+  /** tear down any in-flight GPS attempt (watch, cap timer, fallback) */
+  function cancelGpsDetection() {
+    gpsCancelRef.current?.();
+    gpsCancelRef.current = null;
+  }
+
   /**
    * Capture GPS and auto-detect the barangay. The citizen never picks a
    * barangay — the system resolves it from the coordinates.
@@ -567,6 +584,15 @@ export default function SubmitReportClient({
    * of compact barangays that means the WRONG barangay. So we watch the GPS
    * for a few seconds and keep the most accurate fix (stopping early once
    * it's good), then send THAT one to detection.
+   *
+   * Reliability matters just as much: a cold GPS (indoors, first load) can
+   * produce NOTHING within the cap, and retrying used to start from zero
+   * every time. So (1) the watch accepts the browser's cached fix (≤30 s
+   * old) — once the device has a lock, retrying resolves INSTANTLY; and
+   * (2) if the accurate watch yields nothing by the cap, one coarse
+   * wifi/cell fix is fetched as a last resort instead of dead-ending. Only
+   * a real permission denial becomes "denied" — transient GPS errors are
+   * transient, so the watch keeps retrying until the cap decides.
    */
   function startGpsDetection(opts?: { auto?: boolean }) {
     // auto mode: silent one-shot attempt fired when the first photo lands —
@@ -576,43 +602,91 @@ export default function SubmitReportClient({
       setDetection({ phase: "unsupported" });
       return;
     }
+    // a previous attempt may still be mid-flight — tear it down first or a
+    // stale watch/timer would fire later and clobber this attempt's result
+    cancelGpsDetection();
     setDetection({ phase: "locating" });
 
     let best: GeolocationPosition | null = null;
-    let denied = false;
+    let permissionDenied = false;
     let settled = false;
     let watchId: number | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const stop = () => {
+    const stopWatches = () => {
       if (watchId !== undefined) navigator.geolocation.clearWatch(watchId);
       if (timer !== undefined) clearTimeout(timer);
     };
 
-    const finish = () => {
+    const cancel = () => {
       if (settled) return;
       settled = true;
-      stop();
-      if (!best) {
-        setDetection({ phase: denied ? "denied" : "timeout" });
-        return;
-      }
-      void detectFrom(best);
+      stopWatches();
+    };
+    gpsCancelRef.current = cancel;
+
+    /** attempt reached a verdict — release the cancel handle */
+    const done = () => {
+      settled = true;
+      stopWatches();
+      if (gpsCancelRef.current === cancel) gpsCancelRef.current = null;
+    };
+
+    /** send the best fix we have to barangay detection */
+    const resolve = (pos: GeolocationPosition) => {
+      done();
+      void detectFrom(pos);
+    };
+
+    /** accurate watch gave up nothing — try one instant coarse fix */
+    const coarseFallback = () => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (settled) return; // cancelled or replaced meanwhile
+          resolve(pos);
+        },
+        () => {
+          if (settled) return;
+          done();
+          setDetection({ phase: permissionDenied ? "denied" : "timeout" });
+        },
+        // long maximumAge: any recent wifi/cell fix counts — this path is
+        // about ANSWERING, not precision (the accurate watch already lost)
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+      );
+    };
+
+    const capReached = () => {
+      if (settled) return;
+      if (best) resolve(best); // best available fix — good enough to try
+      else coarseFallback();
     };
 
     watchId = navigator.geolocation.watchPosition(
       (pos) => {
+        if (settled) return;
         const acc = pos.coords.accuracy;
         if (!best || acc < best.coords.accuracy) best = pos;
-        if (acc <= 30) finish(); // accurate enough — no need to keep waiting
+        if (acc <= 30) resolve(pos); // accurate enough — no need to keep waiting
       },
-      () => {
-        denied = true;
+      (err) => {
+        if (settled) return;
+        if (err.code === err.PERMISSION_DENIED) {
+          // no fix will ever arrive — fail fast instead of spinning
+          permissionDenied = true;
+          done();
+          setDetection({ phase: "denied" });
+        }
+        // POSITION_UNAVAILABLE / TIMEOUT are transient — the watch keeps
+        // retrying internally until the cap decides
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      // maximumAge > 0: a cached fix (e.g. from the previous attempt that
+      // warmed the GPS) lands on the FIRST callback instead of re-locking
+      // from scratch on every retry
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
     );
     // hard cap — never keep the citizen waiting longer than this
-    timer = setTimeout(finish, 10000);
+    timer = setTimeout(capReached, 10000);
   }
 
   async function detectFrom(pos: GeolocationPosition) {
