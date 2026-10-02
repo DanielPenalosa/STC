@@ -33,12 +33,31 @@ const headers = { apikey: key, Authorization: `Bearer ${key}` };
 // same layout constants as lib/facebook.ts
 const SIDE = 800;
 const PAD = 20;
-const LABEL_H = 48;
+const LABEL_H = 72;
+const LABEL_FONT_SIZE = 64;
 const LABEL_BG = 0x2333a0ff;
 
 const { createRequire } = await import("node:module");
 const require = createRequire(import.meta.url);
 const Jimp = require("jimp");
+const sharp = require("sharp");
+
+// same decode safety net as lib/facebook.ts — jimp cannot read WebP/HEIC
+function isJimpDecodable(b) {
+  if (b.length < 12) return false;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true;
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true;
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return true;
+  if (b[0] === 0x42 && b[1] === 0x4d) return true;
+  if ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2a) || (b[0] === 0x4d && b[1] === 0x4d && b[3] === 0x2a)) return true;
+  return false;
+}
+
+async function ensureDecodable(bytes) {
+  if (isJimpDecodable(bytes)) return bytes;
+  console.log("converting non-jimp format (WebP/HEIC) to JPEG via sharp");
+  return sharp(bytes).jpeg({ quality: 90 }).toBuffer();
+}
 
 async function loadPhotoBytes(storagePath) {
   if (storagePath.startsWith("cld:")) {
@@ -54,7 +73,7 @@ async function loadPhotoBytes(storagePath) {
     { headers }
   );
   if (!res.ok) throw new Error(`Supabase download ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  return ensureDecodable(Buffer.from(await res.arrayBuffer()));
 }
 
 const { data: report } = await fetch(
@@ -92,7 +111,7 @@ console.log(`downloaded: before=${beforeBytes.length}B after=${afterBytes.length
 const [beforeImg, afterImg, font] = await Promise.all([
   Jimp.read(beforeBytes),
   Jimp.read(afterBytes),
-  Jimp.loadFont(Jimp.FONT_SANS_32_WHITE),
+  Jimp.loadFont(Jimp.FONT_SANS_64_WHITE),
 ]);
 
 const W = PAD + SIDE + PAD + SIDE + PAD;
@@ -104,7 +123,7 @@ const label = (text, x) => {
     for (let px = x; px < x + SIDE; px++) canvas.setPixelColor(LABEL_BG, px, y);
   }
   const w = Jimp.measureText(font, text);
-  canvas.print(font, x + Math.round((SIDE - w) / 2), PAD + 7, text);
+  canvas.print(font, x + Math.round((SIDE - w) / 2), PAD + Math.round((LABEL_H - LABEL_FONT_SIZE) / 2), text);
 };
 
 const leftX = PAD;

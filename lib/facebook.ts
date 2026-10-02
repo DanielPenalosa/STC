@@ -19,6 +19,7 @@
  */
 
 import Jimp from "jimp";
+import sharp from "sharp";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -94,20 +95,33 @@ export async function getFacebookPageInfo(): Promise<{
 
 /* ------------------------------ caption ------------------------------ */
 
-/** "Oct 2, 2026" in the municipality's timezone, or null for missing/invalid dates. */
-function formatDate(iso: string | null | undefined): string | null {
+const MANILA_DATE = new Intl.DateTimeFormat("en-PH", {
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "Asia/Manila",
+});
+const MANILA_TIME = new Intl.DateTimeFormat("en-PH", {
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+  timeZone: "Asia/Manila",
+});
+
+/** "October 2, 2026 at 3:45 PM" in the municipality's timezone, or null for missing/invalid dates. */
+function formatDateTime(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
-  return new Intl.DateTimeFormat("en-PH", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "Asia/Manila",
-  }).format(d);
+  return `${MANILA_DATE.format(d)} at ${MANILA_TIME.format(d)}`;
 }
 
-/** Build the public caption: what happened, where, the situation, and the dates. */
+/**
+ * Build the public caption in the formal register of a municipal page:
+ * a public-advisory heading, what was resolved and where, the situation
+ * as reported by the citizen, and the exact date AND time (Asia/Manila)
+ * the report was received and resolved.
+ */
 function buildCaption(input: {
   refCode: string;
   title: string;
@@ -118,9 +132,7 @@ function buildCaption(input: {
   resolvedAt: string | null;
 }): string {
   const brgy = input.barangayName?.replace(/^Barangay\s+/i, "") ?? null;
-  const whereLine = [brgy ? `📍 Brgy. ${brgy}` : null, input.categoryName]
-    .filter(Boolean)
-    .join(" · ");
+  const whereLine = brgy ? `Brgy. ${brgy}, Sta. Cruz, Laguna` : "Sta. Cruz, Laguna";
 
   const situation = (input.description ?? "").trim().replace(/\s+/g, " ");
   const situationLine = situation
@@ -129,21 +141,31 @@ function buildCaption(input: {
       : situation
     : null;
 
-  const reported = formatDate(input.reportedAt);
-  const resolved = formatDate(input.resolvedAt);
+  const reported = formatDateTime(input.reportedAt);
+  const resolved = formatDateTime(input.resolvedAt);
 
-  const lines = [`✅ RESOLVED — ${input.title}`];
-  if (whereLine) lines.push(whereLine);
-  if (situationLine) lines.push("", situationLine);
+  const lines = [
+    "📢 PUBLIC ADVISORY — REPORT RESOLVED",
+    "",
+    "The Municipal Government of Sta. Cruz, Laguna, through the SCOUT response system, informs the public that the following concern has been verified and acted upon:",
+    "",
+    `📌 ${input.title}`,
+    `📍 ${whereLine}`,
+  ];
+  if (input.categoryName) lines.push(`🗂️ Concern: ${input.categoryName}`);
+  if (situationLine) lines.push("", `💬 "${situationLine}"`);
   if (reported || resolved) {
     lines.push("");
-    if (reported) lines.push(`📅 Reported: ${reported}`);
-    if (resolved) lines.push(`🛠️ Resolved: ${resolved}`);
+    if (reported) lines.push(`🗓️ Date Reported: ${reported}`);
+    if (resolved) lines.push(`✅ Date Resolved: ${resolved}`);
   }
   lines.push(
     "",
-    `Ref: ${input.refCode} · SCOUT — Sta. Cruz Community Observation and Unified Triage`,
-    "#SCOUT #StaCruzLaguna #Transparency"
+    `🔖 Reference No.: ${input.refCode}`,
+    "",
+    "Maraming salamat po sa patuloy na pakikilahok ng ating mga mamamayan. Ipaalam agad sa SCOUT ang anumang isyu sa inyong pamayanan.",
+    "",
+    "#SCOUT #StaCruzLaguna #SerbisyongPubliko #Transparency"
   );
   return lines.join("\n");
 }
@@ -153,11 +175,47 @@ function buildCaption(input: {
 /** Side-by-side layout constants (Facebook renders large photos well up to ~2048px). */
 const SIDE = 800; // each photo scaled to 800×800 (cover)
 const PAD = 20; // margins + gap between the two photos
-const LABEL_H = 48; // blue label band above each photo
+const LABEL_H = 72; // blue label band above each photo (fits the 64px font)
+const LABEL_FONT_SIZE = 64; // jimp's bundled SANS_64 bitmap font
 const LABEL_BG = 0x2333a0ff; // SCOUT blue
 
 /**
- * Download a report photo as raw bytes for compositing.
+ * jimp (v0.22) decodes JPEG/PNG/BMP/GIF/TIFF only. Completion photos can
+ * be WebP (small originals skip client-side recompression) and camera
+ * originals can be HEIC — either makes Jimp.read throw, silently dropping
+ * the labeled composite. Sniff the magic bytes and convert anything else
+ * to JPEG with sharp first.
+ */
+function isJimpDecodable(b: Buffer): boolean {
+  if (b.length < 12) return false;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true; // JPEG
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true; // PNG
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return true; // GIF
+  if (b[0] === 0x42 && b[1] === 0x4d) return true; // BMP
+  if (
+    (b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2a) ||
+    (b[0] === 0x4d && b[1] === 0x4d && b[3] === 0x2a)
+  )
+    return true; // TIFF
+  return false;
+}
+
+/** Convert non-jimp formats (WebP, HEIC, …) to JPEG; returns input on failure. */
+async function ensureDecodable(bytes: Buffer): Promise<Buffer> {
+  if (isJimpDecodable(bytes)) return bytes;
+  try {
+    return await sharp(bytes).jpeg({ quality: 90 }).toBuffer();
+  } catch (e) {
+    console.error(
+      "[facebook] sharp conversion failed:",
+      e instanceof Error ? e.message : e
+    );
+    return bytes;
+  }
+}
+
+/**
+ * Download a report photo as decodable bytes for compositing.
  *   - "cld:<id>" → Cloudinary CDN (forced to JPG — f_auto could return
  *     WebP, which jimp cannot decode)
  *   - anything else → Supabase Storage via the service role
@@ -171,12 +229,55 @@ async function loadPhotoBytes(db: SupabaseClient, storagePath: string): Promise<
       const url = `https://res.cloudinary.com/${cloud}/image/upload/f_jpg,q_auto,w_960/${encodeURIComponent(storagePath.slice(4))}.jpg`;
       const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
       if (!res.ok) return null;
-      return Buffer.from(await res.arrayBuffer());
+      return ensureDecodable(Buffer.from(await res.arrayBuffer()));
     }
     const { data, error } = await db.storage.from("report-photos").download(storagePath);
     if (error || !data) return null;
-    return Buffer.from(await data.arrayBuffer());
+    return ensureDecodable(Buffer.from(await data.arrayBuffer()));
   } catch {
+    return null;
+  }
+}
+
+type BitmapFont = Awaited<ReturnType<typeof Jimp.loadFont>>;
+type JimpImage = InstanceType<typeof Jimp>;
+
+/** Draw the blue band with a centered white label across one photo slot. */
+function drawLabel(canvas: JimpImage, font: BitmapFont, text: string, x: number): void {
+  for (let y = PAD; y < PAD + LABEL_H; y++) {
+    for (let px = x; px < x + SIDE; px++) canvas.setPixelColor(LABEL_BG, px, y);
+  }
+  const w = Jimp.measureText(font, text);
+  canvas.print(
+    font,
+    x + Math.round((SIDE - w) / 2),
+    PAD + Math.round((LABEL_H - LABEL_FONT_SIZE) / 2),
+    text
+  );
+}
+
+/**
+ * Stamp the same blue BEFORE/AFTER band onto a SINGLE photo for the
+ * album-style fallback, so both photos stay identifiable even when the
+ * side-by-side composite can't be built. Returns null on decode failure.
+ */
+async function labelSinglePhoto(bytes: Buffer, text: string): Promise<Buffer | null> {
+  try {
+    const [img, font] = await Promise.all([
+      Jimp.read(bytes),
+      Jimp.loadFont(Jimp.FONT_SANS_64_WHITE),
+    ]);
+    const W = PAD + SIDE + PAD;
+    const H = PAD + LABEL_H + SIDE + PAD;
+    const canvas = new Jimp(W, H, 0xffffffff);
+    canvas.composite(img.cover(SIDE, SIDE), PAD, PAD + LABEL_H);
+    drawLabel(canvas, font, text, PAD);
+    return await canvas.quality(80).getBufferAsync(Jimp.MIME_JPEG);
+  } catch (e) {
+    console.error(
+      "[facebook] single-photo labeling failed:",
+      e instanceof Error ? e.message : e
+    );
     return null;
   }
 }
@@ -192,20 +293,12 @@ async function composeSideBySide(before: Buffer, after: Buffer): Promise<Buffer 
     const [beforeImg, afterImg, font] = await Promise.all([
       Jimp.read(before),
       Jimp.read(after),
-      Jimp.loadFont(Jimp.FONT_SANS_32_WHITE),
+      Jimp.loadFont(Jimp.FONT_SANS_64_WHITE),
     ]);
 
     const W = PAD + SIDE + PAD + SIDE + PAD;
     const H = PAD + LABEL_H + SIDE + PAD;
     const canvas = new Jimp(W, H, 0xffffffff);
-
-    const label = (text: string, x: number) => {
-      for (let y = PAD; y < PAD + LABEL_H; y++) {
-        for (let px = x; px < x + SIDE; px++) canvas.setPixelColor(LABEL_BG, px, y);
-      }
-      const w = Jimp.measureText(font, text);
-      canvas.print(font, x + Math.round((SIDE - w) / 2), PAD + 7, text);
-    };
 
     const leftX = PAD;
     const rightX = PAD + SIDE + PAD;
@@ -213,8 +306,8 @@ async function composeSideBySide(before: Buffer, after: Buffer): Promise<Buffer 
 
     canvas.composite(beforeImg.clone().cover(SIDE, SIDE), leftX, photoY);
     canvas.composite(afterImg.clone().cover(SIDE, SIDE), rightX, photoY);
-    label("BEFORE", leftX);
-    label("AFTER", rightX);
+    drawLabel(canvas, font, "BEFORE", leftX);
+    drawLabel(canvas, font, "AFTER", rightX);
 
     // quality 80 keeps the composite ≈300 KB — Facebook recompresses anyway
     return await canvas.quality(80).getBufferAsync(Jimp.MIME_JPEG);
@@ -230,13 +323,19 @@ async function composeSideBySide(before: Buffer, after: Buffer): Promise<Buffer 
 /**
  * Upload image BYTES to the Page via multipart form-data (the only way to
  * post a composed image — a `url` would have to be publicly fetchable).
- * With `published: true` + caption this creates the final photo post.
+ * Default (`published: true` + caption) creates the final photo post;
+ * `published: false` uploads a hidden photo whose id can be attached to a
+ * feed post with attached_media.
  */
-async function graphUploadPhoto(pageId: string, jpeg: Buffer, caption: string): Promise<string> {
+async function graphUploadPhoto(
+  pageId: string,
+  jpeg: Buffer,
+  opts: { caption?: string; published?: boolean } = {}
+): Promise<string> {
   const form = new FormData();
   form.append("access_token", process.env.FACEBOOK_PAGE_ACCESS_TOKEN ?? "");
-  form.append("published", "true");
-  form.append("caption", caption);
+  form.append("published", opts.published === false ? "false" : "true");
+  if (opts.caption) form.append("caption", opts.caption);
   form.append(
     "source",
     new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }),
@@ -281,6 +380,7 @@ export async function postResolvedReportToFacebook(input: {
   }
   const pageId = process.env.FACEBOOK_PAGE_ID as string;
   const caption = buildCaption(input);
+  const db = createAdminClient();
   const origin = appOrigin();
   const photoUrl = (path: string, width: 640 | 960) =>
     `${origin}/api/photo?bucket=report-photos&path=${encodeURIComponent(path)}&w=${width}`;
@@ -288,7 +388,6 @@ export async function postResolvedReportToFacebook(input: {
   try {
     /* ---- preferred: one labeled BEFORE | AFTER image ---- */
     if (input.photoBeforePath && input.photoAfterPath) {
-      const db = createAdminClient();
       const [beforeBytes, afterBytes] = await Promise.all([
         loadPhotoBytes(db, input.photoBeforePath),
         loadPhotoBytes(db, input.photoAfterPath),
@@ -296,7 +395,7 @@ export async function postResolvedReportToFacebook(input: {
       if (beforeBytes && afterBytes) {
         const composed = await composeSideBySide(beforeBytes, afterBytes);
         if (composed) {
-          const postId = await graphUploadPhoto(pageId, composed, caption);
+          const postId = await graphUploadPhoto(pageId, composed, { caption });
           console.log(`[facebook] posted ${input.refCode} (side-by-side) → photo ${postId}`);
           return { ok: true, postId };
         }
@@ -306,14 +405,34 @@ export async function postResolvedReportToFacebook(input: {
       );
     }
 
-    /* ---- fallback: album-style multi-photo attach (public URLs) ---- */
+    /* ---- fallback: album-style multi-photo attach ---- */
     const photoIds: string[] = [];
 
-    // Upload each photo unpublished, then attach all of them to one feed
-    // post. A single broken photo must not drop the whole album — tolerate
-    // per-photo failure and post with whatever made it through.
+    // Upload each photo unpublished (stamped BEFORE/AFTER when we can
+    // decode it), then attach all of them to one feed post. A single
+    // broken photo must not drop the whole album — tolerate per-photo
+    // failure and post with whatever made it through.
     const tryPhoto = async (path: string | null, label: string) => {
       if (!path) return;
+      // Preferred: download the bytes and stamp the label onto the photo
+      // itself, so the album post reads like the composite one.
+      const bytes = await loadPhotoBytes(db, path);
+      if (bytes) {
+        const labeled = await labelSinglePhoto(bytes, label);
+        if (labeled) {
+          try {
+            const photoId = await graphUploadPhoto(pageId, labeled, { published: false });
+            photoIds.push(photoId);
+            return;
+          } catch (e) {
+            console.error(
+              `[facebook] labeled ${label} upload failed:`,
+              e instanceof Error ? e.message : e
+            );
+          }
+        }
+      }
+      // Last resort: let Facebook fetch the public URL (unlabeled).
       const url = photoUrl(path, 960);
       try {
         const res = await graph<{ id: string }>("/me/photos", {
@@ -329,8 +448,8 @@ export async function postResolvedReportToFacebook(input: {
       }
     };
 
-    await tryPhoto(input.photoAfterPath, "after");
-    await tryPhoto(input.photoBeforePath, "before");
+    await tryPhoto(input.photoAfterPath, "AFTER");
+    await tryPhoto(input.photoBeforePath, "BEFORE");
 
     let postId: string | undefined;
     if (photoIds.length > 0) {

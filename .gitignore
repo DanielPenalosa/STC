@@ -12,3 +12,6 @@ out/
 # local tooling state
 .freebuff/
 .vscode/
+
+# smoke-test output (scripts/test-sidebyside.mjs)
+.sidebyside-test.jpg
