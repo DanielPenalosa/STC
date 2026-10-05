@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { Card } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { Logo, CLIENT_NAME, TAGLINE } from "@/app/brand";
+import { Logo } from "@/app/brand";
+import { getBranding } from "@/lib/branding";
+
+// branding comes from app_settings — render live so a rebrand needs no rebuild
+export const dynamic = "force-dynamic";
 
 function Steps({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -12,7 +16,11 @@ function Steps({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-export default function InstallPage() {
+export default async function InstallPage() {
+  // admin-configured branding (Admin → Settings), falling back to brand.tsx
+  const b = await getBranding();
+  const CLIENT_NAME = b.clientName;
+  const TAGLINE = b.tagline;
   return (
     <main className="mx-auto max-w-lg px-4 py-8">
       <div className="mb-6 flex items-center gap-3">

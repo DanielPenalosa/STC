@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/data";
 import { PageHeader } from "@/components/ui";
-import { CITY_NAME } from "@/app/brand";
+import { getBranding } from "@/lib/branding";
 import { publicPhotoUrl } from "@/lib/photo";
 import { scopeFor, applyScope } from "@/lib/scope";
 import MapClient, { type MapReport } from "./map-client";
@@ -11,6 +11,7 @@ import type { Report } from "@/lib/types";
 export default async function MapPage() {
   const supabase = await createClient();
   const profile = await requireProfile();
+  const { cityName: CITY_NAME } = await getBranding();
 
   // guarantee the official barangay list exists before reading it
   const { ensureOfficialBarangays } = await import("@/lib/barangays-official");

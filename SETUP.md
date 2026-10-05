@@ -128,6 +128,9 @@ Test it: submit a report with a photo as a citizen → the report page shows the
 | What | Where |
 |---|---|
 | Client name / city / tagline | **Admin → Settings** (writes `app_settings`, no redeploy) and/or `app/brand.tsx` |
+| Support email / contact number | **Admin → Settings → Branding & contact** (shown on every profile) |
+| Facebook auto-post on/off | **Admin → Settings → Facebook card** (`facebook_autopost` kill switch; keys stay in env) |
+| Config health (DB, keys, storage) | **Admin → Settings → System status** (read-only checks) |
 | Logo `[LOGO]` | set `NEXT_PUBLIC_LOGO_URL` in `.env.local`, or edit `app/brand.tsx` |
 | Real barangays | **Admin → Barangays** — rename the 5 placeholders or add new |
 | Real departments | **Admin → Departments** — same |

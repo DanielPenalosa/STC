@@ -1,24 +1,31 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { CLIENT_NAME, CLIENT_SHORT_NAME, CITY_NAME, TAGLINE } from "./brand";
+import { getBranding } from "@/lib/branding";
 
-export const metadata: Metadata = {
-  title: {
-    default: `${CLIENT_NAME} — ${TAGLINE}`,
-    template: `%s · ${CLIENT_SHORT_NAME}`,
-  },
-  description: `SCOUT — AI-powered community issue reporting for ${CITY_NAME}. Snap a photo, AI classifies it and routes it to the right department or barangay automatically.`,
-  manifest: "/manifest.json",
-  icons: {
-    icon: [{ url: "/logo.png", type: "image/png" }],
-    apple: [{ url: "/logo.png" }],
-  },
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: CLIENT_NAME,
-  },
-};
+/**
+ * Titles/description follow the admin-configured branding (Admin → Settings →
+ * app_settings), falling back to app/brand.tsx when the DB is unreachable.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const b = await getBranding();
+  return {
+    title: {
+      default: `${b.clientName} — ${b.tagline}`,
+      template: `%s · ${b.clientName}`,
+    },
+    description: `${b.clientName} — AI-powered community issue reporting for ${b.cityName}. Snap a photo, AI classifies it and routes it to the right department or barangay automatically.`,
+    manifest: "/manifest.json",
+    icons: {
+      icon: [{ url: "/logo.png", type: "image/png" }],
+      apple: [{ url: "/logo.png" }],
+    },
+    appleWebApp: {
+      capable: true,
+      statusBarStyle: "default",
+      title: b.clientName,
+    },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: "#2333A0", // Santa Cruz royal blue

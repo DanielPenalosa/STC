@@ -1,5 +1,9 @@
-import { TAGLINE } from "@/app/brand";
+import { getBranding } from "@/lib/branding";
 import { AuthLogo } from "@/components/auth-logo";
+
+// branding comes from app_settings — never prerender it, or the login screen
+// would show a stale client name/tagline until the next build
+export const dynamic = "force-dynamic";
 import { Icon, type IconName } from "@/components/icons";
 
 const HIGHLIGHTS: { icon: IconName; title: string; text: string }[] = [
@@ -20,11 +24,12 @@ const HIGHLIGHTS: { icon: IconName; title: string; text: string }[] = [
   },
 ];
 
-export default function AuthLayout({
+export default async function AuthLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const { tagline } = await getBranding();
   return (
     <main className="flex min-h-screen bg-surface">
       {/* brand panel — desktop only, blue texture like the dashboard chrome */}
@@ -46,7 +51,7 @@ export default function AuthLayout({
         <div className="relative flex flex-col items-center text-center">
           <AuthLogo size={112} />
           <p className="mt-5 text-[11px] font-bold uppercase tracking-[0.22em] text-accent-300">
-            {TAGLINE}
+            {tagline}
           </p>
         </div>
 

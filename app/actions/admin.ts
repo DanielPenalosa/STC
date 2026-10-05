@@ -131,6 +131,15 @@ async function publishToFacebook(reportId: string): Promise<void> {
   try {
     if (!facebookConfigured()) return;
     const db = createAdminClient();
+
+    // admin kill switch — Admin → Settings → Facebook auto-posting
+    const { data: flag } = await db
+      .from("app_settings")
+      .select("value")
+      .eq("key", "facebook_autopost")
+      .maybeSingle();
+    if ((flag?.value ?? "on") === "off") return;
+
     const { data: report } = await db
       .from("reports")
       .select(
@@ -700,7 +709,13 @@ export async function testFacebookConnection(): Promise<{
 export async function saveSettings(
   entries: { key: string; value: string }[]
 ): Promise<ActionResult> {
-  await requireAdmin();
+  // return a clean error instead of throwing — an expired session must not
+  // surface as a 500 to the settings form/toggle
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: "Admins only" };
+  }
   const supabase = await createClient();
   for (const e of entries) {
     const { error } = await supabase

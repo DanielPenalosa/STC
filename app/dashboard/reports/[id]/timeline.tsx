@@ -1,6 +1,11 @@
 import { Card } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
 import { STATUS_LABELS } from "@/lib/constants";
+import {
+  collapseStatusHistory,
+  isProgressNote,
+  progressNoteText,
+} from "@/lib/timeline";
 
 const STEP_ICONS: Record<string, IconName> = {
   submitted: "send",
@@ -60,6 +65,9 @@ export default function ActivityLog({
   actors?: Record<string, string | undefined>;
   reporterName?: string;
 }) {
+  // one event per real transition — the DB trigger and the noted server-action
+  // insert used to render the same status change twice
+  const events = collapseStatusHistory(history);
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
@@ -68,24 +76,24 @@ export default function ActivityLog({
           Report Timeline
         </p>
         <span className="text-[11px] font-medium text-slate-400">
-          {history.length} event{history.length === 1 ? "" : "s"}
+          {events.length} event{events.length === 1 ? "" : "s"}
         </span>
       </div>
 
-      {history.length === 0 ? (
+      {events.length === 0 ? (
         <p className="px-4 py-6 text-center text-xs text-slate-400">
           No activity yet — updates appear here as staff process the report.
         </p>
       ) : (
         <ol className="max-h-[360px] space-y-0 overflow-y-auto px-4 py-3">
-          {history.map((h, i) => {
-            const isNote = (h.note ?? "").startsWith("Progress note: ");
+          {events.map((h, i) => {
+            const isNote = isProgressNote(h.note);
             const label = isNote
               ? "Progress Note"
               : LABELS[h.to_status] ??
                 STATUS_LABELS[h.to_status as keyof typeof STATUS_LABELS] ??
                 h.to_status;
-            const noteText = isNote ? (h.note ?? "").replace(/^Progress note: /, "") : h.note;
+            const noteText = isNote ? progressNoteText(h.note) : h.note;
             const by = h.changed_by
               ? (actors?.[h.changed_by] ??
                 (h.changed_by && h.id === "created" ? reporterName : undefined) ??
@@ -96,7 +104,7 @@ export default function ActivityLog({
             return (
               <li key={h.id} className="relative flex gap-3 pb-4 last:pb-0">
                 {/* rail */}
-                {i < history.length - 1 && (
+                {i < events.length - 1 && (
                   <span className="absolute left-[9px] top-5 h-full w-px bg-slate-100" aria-hidden="true" />
                 )}
                 <span

@@ -4,17 +4,33 @@ import { useState } from "react";
 import { useNotifications } from "@/components/providers";
 import { PageHeader, Card, btn } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icons";
-import { CLIENT_NAME, CITY_NAME, CONTACT_EMAIL, CONTACT_PHONE } from "@/app/brand";
+import { CLIENT_NAME, CITY_NAME, TAGLINE, CONTACT_EMAIL, CONTACT_PHONE } from "@/app/brand";
 import { ROLE_LABELS } from "@/lib/constants";
 import type { Profile } from "@/lib/types";
+import type { Branding } from "@/lib/branding";
 
 const inputShell =
   "flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 transition focus-within:border-primary-400 focus-within:ring-4 focus-within:ring-primary-50";
 const field =
   "w-full bg-transparent py-2.5 text-sm outline-none placeholder:text-slate-300";
 
-export default function ProfilePage({ profile }: { profile: Profile }) {
+export default function ProfilePage({
+  profile,
+  branding,
+}: {
+  profile: Profile;
+  branding?: Branding;
+}) {
   const { notifications } = useNotifications();
+  // admin-configured branding/contact (falls back to app/brand.tsx defaults)
+  const b: Branding = branding ?? {
+    clientName: CLIENT_NAME,
+    cityName: CITY_NAME,
+    tagline: TAGLINE,
+    contactEmail: CONTACT_EMAIL,
+    contactPhone: CONTACT_PHONE,
+    autoPost: true,
+  };
   const [fullName, setFullName] = useState(profile.full_name ?? "");
   const [phone, setPhone] = useState(profile.phone ?? "");
   const [address, setAddress] = useState(profile.address ?? "");
@@ -58,7 +74,7 @@ export default function ProfilePage({ profile }: { profile: Profile }) {
               {profile.full_name ?? "User"}
             </p>
             <p className="text-xs text-slate-400">
-              {ROLE_LABELS[profile.role]} · {CITY_NAME}
+              {ROLE_LABELS[profile.role]} · {b.cityName}
             </p>
           </div>
         </div>
@@ -108,9 +124,9 @@ export default function ProfilePage({ profile }: { profile: Profile }) {
           <div className="min-w-0 text-sm">
             <p className="font-semibold text-slate-700">Help &amp; support</p>
             <p className="mt-0.5 text-xs leading-relaxed text-slate-400">
-              {CLIENT_NAME} · {CITY_NAME}
+              {b.clientName} · {b.cityName}
               <br />
-              {CONTACT_EMAIL} · {CONTACT_PHONE}
+              {b.contactEmail} · {b.contactPhone}
             </p>
           </div>
         </div>

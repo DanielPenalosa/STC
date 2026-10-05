@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Logo, CLIENT_NAME, CITY_NAME, TAGLINE } from "./brand";
+import { Logo } from "./brand";
+import { getBranding } from "@/lib/branding";
 import { Icon, type IconName } from "@/components/icons";
 import { Reveal } from "@/components/reveal";
 import HeroShowcase from "./hero-showcase";
@@ -55,10 +56,10 @@ const STATS: { value: string; label: string; icon: IconName }[] = [
   { value: "100%", label: "Reports tracked to resolution", icon: "check-circle" },
 ];
 
-const FAQS: { q: string; a: string }[] = [
+const faqs = (cityName: string): { q: string; a: string }[] => [
   {
     q: "Is it free to use?",
-    a: `Yes — creating an account and submitting reports is completely free for residents of ${CITY_NAME}.`,
+    a: `Yes — creating an account and submitting reports is completely free for residents of ${cityName}.`,
   },
   {
     q: "What kinds of issues can I report?",
@@ -78,6 +79,11 @@ export default async function Landing() {
   // Resolved reports for the public transparency feed — empty-safe: the
   // section renders nothing when there's nothing resolved yet.
   const { items: resolved } = await getResolvedReports(6);
+  // admin-configured branding (Admin → Settings), falling back to brand.tsx
+  const b = await getBranding();
+  const CLIENT_NAME = b.clientName;
+  const CITY_NAME = b.cityName;
+  const TAGLINE = b.tagline;
   return (
     <main
       className="landing-fade flex min-h-screen flex-col bg-surface bg-cover bg-center bg-fixed"
@@ -296,7 +302,7 @@ export default async function Landing() {
           </h2>
 
           <div className="reveal-group mt-8 space-y-3">
-            {FAQS.map((f) => (
+            {faqs(CITY_NAME).map((f) => (
               <details
                 key={f.q}
                 className="reveal group rounded-2xl border border-slate-200 bg-white px-5 py-4 transition hover:border-primary-200"

@@ -6,6 +6,8 @@ import { Card, StatusBadge, PriorityBadge } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import ExportMenu, { type ExportRow } from "@/components/export-menu";
 import type { Report } from "@/lib/types";
+import { STATUS_LABELS, type ReportStatus } from "@/lib/constants";
+import { buildTimeline, progressNoteText } from "@/lib/timeline";
 
 type Row = Report & {
   profiles: { full_name: string } | null;
@@ -408,7 +410,11 @@ export default function ReportsTable({
                   <Icon name="clock" size="sm" className="text-slate-400" />
                   Report Timeline
                 </p>
-                <Timeline history={historyByReport.get(active.id) ?? []} status={active.status} />
+                <Timeline
+                  history={historyByReport.get(active.id) ?? []}
+                  status={active.status}
+                  createdAt={active.created_at}
+                />
               </section>
 
               {/* actions */}
@@ -435,39 +441,47 @@ export default function ReportsTable({
   );
 }
 
-/** Compact vertical timeline from status_history (fallback: current status). */
+/**
+ * Compact vertical timeline from status_history — deduplicated and pinned to
+ * the report's real current status (see buildTimeline in @/lib/timeline).
+ */
 function Timeline({
   history,
   status,
+  createdAt,
 }: {
   history: HistoryEntry[];
   status: string;
+  createdAt: string;
 }) {
-  const entries =
-    history.length > 0
-      ? history
-      : [{ to_status: status, note: null, created_at: new Date().toISOString() }];
+  const entries = buildTimeline(history, status, createdAt);
 
   return (
     <ol className="space-y-0">
       {entries.map((h, i) => {
         const last = i === entries.length - 1;
+        const label = h.isNote
+          ? "Progress Note"
+          : (STEP_LABELS[h.to_status] ??
+            STATUS_LABELS[h.to_status as ReportStatus] ??
+            h.to_status);
+        const noteText = h.isNote ? progressNoteText(h.note) : h.note;
         return (
-          <li key={`${h.to_status}-${h.created_at}`} className="relative flex gap-3 pb-3.5 last:pb-0">
+          <li key={`${i}-${h.to_status}-${h.created_at}`} className="relative flex gap-3 pb-3.5 last:pb-0">
             {!last && (
               <span className="absolute left-[7px] top-4 h-full w-px bg-slate-100" aria-hidden="true" />
             )}
             <span
               className={`relative z-10 mt-0.5 h-[15px] w-[15px] shrink-0 rounded-full border-2 ${
-                last ? "border-primary-600 bg-white" : "border-slate-300 bg-white"
+                h.current ? "border-primary-600 bg-white" : "border-slate-300 bg-white"
               }`}
             >
-              {last && <span className="absolute inset-[2px] rounded-full bg-primary-600" />}
+              {h.current && <span className="absolute inset-[2px] rounded-full bg-primary-600" />}
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline justify-between gap-2">
-                <p className={`truncate text-[13px] font-semibold ${last ? "text-slate-800" : "text-slate-500"}`}>
-                  {STEP_LABELS[h.to_status] ?? h.to_status}
+                <p className={`truncate text-[13px] font-semibold ${h.current ? "text-slate-800" : "text-slate-500"}`}>
+                  {label}
                 </p>
                 <time className="shrink-0 text-[10px] text-slate-400">
                   {new Date(h.created_at).toLocaleDateString(undefined, {
@@ -481,8 +495,8 @@ function Timeline({
                   })}
                 </time>
               </div>
-              {h.note && (
-                <p className="mt-0.5 truncate text-[11px] text-slate-400">by {h.note}</p>
+              {noteText && (
+                <p className="mt-0.5 truncate text-[11px] text-slate-400">{noteText}</p>
               )}
             </div>
           </li>
