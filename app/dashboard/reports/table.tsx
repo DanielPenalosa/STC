@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { Card, StatusBadge, PriorityBadge } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import ExportMenu, { type ExportRow } from "@/components/export-menu";
@@ -33,6 +35,11 @@ export type HistoryEntry = {
 };
 
 const PAGE_SIZE = 10;
+
+/** Reports created within this window carry the "NEW" highlight. */
+const NEW_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** How long a live-arriving row keeps its one-shot flash animation. */
+const FLASH_MS = 20_000;
 
 /** Client-safe photo URL — served by the authenticated /api/photo proxy. */
 function photoUrl(path: string): string {
@@ -82,6 +89,97 @@ export default function ReportsTable({
   const [page, setPage] = useState(1);
   const [active, setActive] = useState<Row | null>(null);
 
+  const router = useRouter();
+  const [now, setNow] = useState(() => Date.now());
+  const [freshIds, setFreshIds] = useState<Set<string>>(() => new Set());
+  const [toast, setToast] = useState<{
+    ref: string;
+    title: string;
+    count: number;
+  } | null>(null);
+
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  /** "New" = created in the last 24h, or it just popped up while watching. */
+  const isNewRow = (r: Row) =>
+    freshIds.has(r.id) ||
+    now - new Date(r.created_at).getTime() < NEW_WINDOW_MS;
+
+  // re-check every minute so a highlight expires once the report turns 24h old
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Live pop-up: a citizen submits a report → this row flashes in right away
+  // (RLS scopes the stream to the staff member's unit) and the server list
+  // refreshes — throttled so bursts of reports coalesce into one re-fetch.
+  useEffect(() => {
+    const supabase = createClient();
+    const clearFlash = (id: string) => {
+      const t = flashTimers.current.get(id);
+      if (t) clearTimeout(t);
+      flashTimers.current.delete(id);
+      setFreshIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    };
+
+    const channel = supabase
+      .channel("reports-new-report-watch")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "reports" },
+        (payload) => {
+          const row = payload.new as {
+            id?: string;
+            ref_code?: string;
+            title?: string;
+          };
+          if (!row.id) return;
+          const id = row.id;
+
+          setNow(Date.now());
+          setFreshIds((prev) => new Set(prev).add(id));
+          const existing = flashTimers.current.get(id);
+          if (existing) clearTimeout(existing);
+          flashTimers.current.set(id, setTimeout(() => clearFlash(id), FLASH_MS));
+
+          setToast((prev) => ({
+            ref: row.ref_code ?? "New report",
+            title: row.title ?? "A citizen just submitted a report",
+            count: prev ? prev.count + 1 : 1,
+          }));
+          if (toastTimer.current) clearTimeout(toastTimer.current);
+          toastTimer.current = setTimeout(() => setToast(null), 6000);
+
+          if (!refreshTimer.current) {
+            refreshTimer.current = setTimeout(() => {
+              refreshTimer.current = null;
+              router.refresh();
+            }, 700);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+      if (refreshTimer.current) {
+        clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      for (const t of flashTimers.current.values()) clearTimeout(t);
+      flashTimers.current.clear();
+    };
+  }, [router]);
+
   const totalPages = Math.max(1, Math.ceil(reports.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const rows = reports.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
@@ -99,11 +197,21 @@ export default function ReportsTable({
     date: new Date(r.created_at).toLocaleDateString(),
   }));
 
+  const newCount = reports.filter(isNewRow).length;
+
   return (
     <>
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-bold text-slate-800">All Reports</p>
+          <p className="text-sm font-bold text-slate-800">
+            All Reports
+            {newCount > 0 && (
+              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary-600 px-2 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white">
+                <span className="live-blink h-1.5 w-1.5 rounded-full bg-accent-300" />
+                {newCount} new
+              </span>
+            )}
+          </p>
           <ExportMenu rows={exportRows} />
         </div>
 
@@ -124,13 +232,16 @@ export default function ReportsTable({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((r, i) => (
+              {rows.map((r, i) => {
+                const isNew = isNewRow(r);
+                const fresh = freshIds.has(r.id);
+                return (
                 <tr
                   key={r.id}
                   onClick={() => setActive(r)}
                   className={`tap-scale cursor-pointer transition-colors hover:bg-primary-50/40 ${
-                    active?.id === r.id ? "bg-primary-50/60" : ""
-                  }`}
+                    isNew || active?.id === r.id ? "bg-primary-50/60" : ""
+                  } ${fresh ? "new-report-flash" : ""}`}
                 >
                   <td className="px-3 py-2.5 text-xs text-slate-300">
                     {(safePage - 1) * PAGE_SIZE + i + 1}
@@ -139,6 +250,7 @@ export default function ReportsTable({
                     <span className="font-mono text-xs font-semibold text-primary-700">
                       {r.ref_code}
                     </span>
+                    {isNew && <NewChip />}
                     <span className="block max-w-[220px] truncate text-xs text-slate-500">
                       {r.title}
                     </span>
@@ -205,7 +317,8 @@ export default function ReportsTable({
                     </span>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
@@ -219,14 +332,22 @@ export default function ReportsTable({
 
         {/* mobile cards */}
         <div className="divide-y divide-slate-100 md:hidden">
-          {rows.map((r) => (
+          {rows.map((r) => {
+            const isNew = isNewRow(r);
+            const fresh = freshIds.has(r.id);
+            return (
             <button
               key={r.id}
               onClick={() => setActive(r)}
-              className="tap-scale flex w-full items-center gap-3 px-4 py-3 text-left"
+              className={`tap-scale flex w-full items-center gap-3 px-4 py-3 text-left ${
+                isNew ? "bg-primary-50/60" : ""
+              } ${fresh ? "new-report-flash" : ""}`}
             >
               <div className="min-w-0 flex-1">
-                <p className="font-mono text-[11px] font-semibold text-primary-700">{r.ref_code}</p>
+                <p className="font-mono text-[11px] font-semibold text-primary-700">
+                  {r.ref_code}
+                  {isNew && <NewChip />}
+                </p>
                 <p className="truncate text-sm font-medium text-slate-800">{r.title}</p>
                 <p className="truncate text-xs text-slate-400">
                   {r.categories?.name ?? "—"} · {r.barangays?.name ?? "—"} ·{" "}
@@ -236,7 +357,8 @@ export default function ReportsTable({
               <StatusBadge status={r.status} />
               <Icon name="chevron-right" size="sm" className="shrink-0 text-slate-300" />
             </button>
-          ))}
+            );
+          })}
           {rows.length === 0 && (
             <p className="px-4 py-10 text-center text-sm text-slate-400">
               No reports match the current filters.
@@ -272,6 +394,30 @@ export default function ReportsTable({
           )}
         </div>
       </Card>
+
+      {/* live toast — pops the moment a new report arrives over realtime */}
+      {toast && (
+        <div className="page-enter fixed bottom-24 right-4 z-[70] flex max-w-[calc(100vw-2rem)] items-center gap-2.5 rounded-xl border border-primary-200 bg-white px-3.5 py-2.5 shadow-xl">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-600 text-white">
+            <Icon name="bell" size="sm" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-primary-600">
+              New report{toast.count > 1 ? ` ×${toast.count}` : ""}
+            </p>
+            <p className="truncate text-xs font-semibold text-slate-700">
+              {toast.ref} — {toast.title}
+            </p>
+          </div>
+          <button
+            onClick={() => setToast(null)}
+            aria-label="Dismiss"
+            className="ml-1 shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <Icon name="close" size="sm" />
+          </button>
+        </div>
+      )}
 
       {/* ===== Report Details drawer (reference layout) ===== */}
       {active && (
@@ -503,6 +649,16 @@ function Timeline({
         );
       })}
     </ol>
+  );
+}
+
+/** Small pulsing "NEW" pill so staff spot reports they haven't seen yet. */
+function NewChip() {
+  return (
+    <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-primary-600 px-1.5 py-px align-middle text-[9px] font-extrabold uppercase tracking-wider text-white shadow-sm">
+      <span className="live-blink h-1.5 w-1.5 rounded-full bg-accent-300" />
+      New
+    </span>
   );
 }
 

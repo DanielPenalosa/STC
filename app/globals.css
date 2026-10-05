@@ -192,6 +192,18 @@ input[type="checkbox"] {
   animation: dot-pulse 1.8s ease-in-out infinite;
 }
 
+/* a report that just popped up live on the Reports table: one attention
+   flash, then it settles into the standard "new" row tint. Deliberately NO
+   fill-mode — when the animation ends the row falls back to its own
+   background classes (tint / hover) seamlessly. */
+@keyframes new-report-flash {
+  0%, 15% { background-color: #a4dcfa; }
+  100% { background-color: rgb(238 240 252 / 0.7); }
+}
+.new-report-flash {
+  animation: new-report-flash 1.9s cubic-bezier(0.22, 1, 0.36, 1) 1;
+}
+
 /* leaflet container fix inside rounded cards */
 .leaflet-container {
   border-radius: inherit;
@@ -374,6 +386,7 @@ input[type="checkbox"] {
   .hover-lift,
   .press,
   .nav-dot-active,
+  .new-report-flash,
   .map-fade {
     animation: none !important;
     transition: none !important;
