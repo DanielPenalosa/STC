@@ -10,6 +10,15 @@ import ExportMenu, { type ExportRow } from "@/components/export-menu";
 import type { Report } from "@/lib/types";
 import { STATUS_LABELS, type ReportStatus } from "@/lib/constants";
 import { buildTimeline, progressNoteText } from "@/lib/timeline";
+import { useNotifications } from "@/components/providers";
+import { markReportNotificationsRead } from "@/app/actions/notifications";
+import { readSeenUpdates, rememberSeenUpdate } from "@/lib/report-seen";
+import {
+  UPDATED_WINDOW_MS,
+  UPDATED_EPSILON_MS,
+  timeAgo,
+  UpdatedChip,
+} from "@/components/updated-chip";
 
 type Row = Report & {
   profiles: { full_name: string } | null;
@@ -40,6 +49,9 @@ const PAGE_SIZE = 10;
 const NEW_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** How long a live-arriving row keeps its one-shot flash animation. */
 const FLASH_MS = 20_000;
+
+// UPDATED-window/label helpers are shared with the staff lists — see
+// components/updated-chip.tsx
 
 /** Client-safe photo URL — served by the authenticated /api/photo proxy. */
 function photoUrl(path: string): string {
@@ -90,9 +102,16 @@ export default function ReportsTable({
   const [active, setActive] = useState<Row | null>(null);
 
   const router = useRouter();
+  const { refresh: refreshNotifications } = useNotifications();
   const [now, setNow] = useState(() => Date.now());
   const [freshIds, setFreshIds] = useState<Set<string>>(() => new Set());
+  const [updatedIds, setUpdatedIds] = useState<Set<string>>(() => new Set());
+  // report versions the user already opened (localStorage; loaded after mount
+  // so SSR stays deterministic) — opening a report clears its UPDATED mark
+  const [seen, setSeen] = useState<Record<string, string>>({});
+  useEffect(() => setSeen(readSeenUpdates()), []);
   const [toast, setToast] = useState<{
+    kind: "new" | "update";
     ref: string;
     title: string;
     count: number;
@@ -101,11 +120,61 @@ export default function ReportsTable({
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const updateTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   /** "New" = created in the last 24h, or it just popped up while watching. */
   const isNewRow = (r: Row) =>
     freshIds.has(r.id) ||
     now - new Date(r.created_at).getTime() < NEW_WINDOW_MS;
+
+  /**
+   * "Updated" = genuinely re-touched after creation and within the last 24h,
+   * or a barangay/department just worked this report while watching. The DB
+   * trigger bumps reports.updated_at on every update, so this fires for status
+   * changes, progress notes, and re-routing alike.
+   */
+  /** The user already opened this exact version of the report → no highlight. */
+  const hasSeenVersion = (r: Row) => {
+    const stamp = seen[r.id];
+    return stamp
+      ? new Date(stamp).getTime() >= new Date(r.updated_at).getTime()
+      : false;
+  };
+
+  const isUpdatedRow = (r: Row) =>
+    !hasSeenVersion(r) &&
+    (updatedIds.has(r.id) ||
+      (new Date(r.updated_at).getTime() -
+        new Date(r.created_at).getTime() >
+        UPDATED_EPSILON_MS &&
+        now - new Date(r.updated_at).getTime() < UPDATED_WINDOW_MS));
+
+  /**
+   * Open the details drawer AND clear this version's signals: the cyan
+   * UPDATED highlight (persisted, so it stays gone after reloads) and the
+   * report's unread notifications — the bell + nav badges drop once the
+   * server confirms the mark-read.
+   */
+  const openReport = (r: Row) => {
+    setActive(r);
+    setSeen((prev) => {
+      if (prev[r.id] === r.updated_at) return prev;
+      rememberSeenUpdate(r.id, r.updated_at);
+      return { ...prev, [r.id]: r.updated_at };
+    });
+    setUpdatedIds((prev) => {
+      if (!prev.has(r.id)) return prev;
+      const next = new Set(prev);
+      next.delete(r.id);
+      return next;
+    });
+    // best-effort: a failed mark-read must never break the row click
+    void markReportNotificationsRead(r.id)
+      .then(() => refreshNotifications())
+      .catch((err) =>
+        console.warn("markReportNotificationsRead failed", err)
+      );
+  };
 
   // re-check every minute so a highlight expires once the report turns 24h old
   useEffect(() => {
@@ -113,21 +182,51 @@ export default function ReportsTable({
     return () => clearInterval(t);
   }, []);
 
-  // Live pop-up: a citizen submits a report → this row flashes in right away
-  // (RLS scopes the stream to the staff member's unit) and the server list
-  // refreshes — throttled so bursts of reports coalesce into one re-fetch.
+  // Live pop-up: a citizen submits a report, OR a barangay/department updates
+  // one → the row flashes right away (RLS scopes the stream to the staff
+  // member's unit) and the server list re-fetches — throttled so bursts
+  // coalesce into one re-fetch, which also re-sorts "most recently touched
+  // first" so an updated report jumps to the top of the list.
   useEffect(() => {
     const supabase = createClient();
-    const clearFlash = (id: string) => {
-      const t = flashTimers.current.get(id);
-      if (t) clearTimeout(t);
-      flashTimers.current.delete(id);
-      setFreshIds((prev) => {
-        if (!prev.has(id)) return prev;
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
+
+    const scheduleRefresh = () => {
+      if (refreshTimer.current) return;
+      refreshTimer.current = setTimeout(() => {
+        refreshTimer.current = null;
+        router.refresh();
+      }, 700);
+    };
+
+    const popToast = (t: { kind: "new" | "update"; ref: string; title: string }) => {
+      setToast((prev) => ({
+        ...t,
+        count: prev && prev.kind === t.kind ? prev.count + 1 : 1,
+      }));
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), 6000);
+    };
+
+    /** One-shot flash, then the id drops out of its highlight set. */
+    const armFlash = (
+      id: string,
+      set: (updater: (prev: Set<string>) => Set<string>) => void,
+      timers: Map<string, ReturnType<typeof setTimeout>>
+    ) => {
+      const existing = timers.get(id);
+      if (existing) clearTimeout(existing);
+      timers.set(
+        id,
+        setTimeout(() => {
+          timers.delete(id);
+          set((prev) => {
+            if (!prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }, FLASH_MS)
+      );
     };
 
     const channel = supabase
@@ -146,24 +245,36 @@ export default function ReportsTable({
 
           setNow(Date.now());
           setFreshIds((prev) => new Set(prev).add(id));
-          const existing = flashTimers.current.get(id);
-          if (existing) clearTimeout(existing);
-          flashTimers.current.set(id, setTimeout(() => clearFlash(id), FLASH_MS));
-
-          setToast((prev) => ({
+          armFlash(id, setFreshIds, flashTimers.current);
+          popToast({
+            kind: "new",
             ref: row.ref_code ?? "New report",
             title: row.title ?? "A citizen just submitted a report",
-            count: prev ? prev.count + 1 : 1,
-          }));
-          if (toastTimer.current) clearTimeout(toastTimer.current);
-          toastTimer.current = setTimeout(() => setToast(null), 6000);
+          });
+          scheduleRefresh();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "reports" },
+        (payload) => {
+          const row = payload.new as {
+            id?: string;
+            ref_code?: string;
+            title?: string;
+          };
+          if (!row.id) return;
+          const id = row.id;
 
-          if (!refreshTimer.current) {
-            refreshTimer.current = setTimeout(() => {
-              refreshTimer.current = null;
-              router.refresh();
-            }, 700);
-          }
+          setNow(Date.now());
+          setUpdatedIds((prev) => new Set(prev).add(id));
+          armFlash(id, setUpdatedIds, updateTimers.current);
+          popToast({
+            kind: "update",
+            ref: row.ref_code ?? "Report updated",
+            title: row.title ?? "A report was just worked on",
+          });
+          scheduleRefresh();
         }
       )
       .subscribe();
@@ -177,6 +288,8 @@ export default function ReportsTable({
       if (toastTimer.current) clearTimeout(toastTimer.current);
       for (const t of flashTimers.current.values()) clearTimeout(t);
       flashTimers.current.clear();
+      for (const t of updateTimers.current.values()) clearTimeout(t);
+      updateTimers.current.clear();
     };
   }, [router]);
 
@@ -198,6 +311,7 @@ export default function ReportsTable({
   }));
 
   const newCount = reports.filter(isNewRow).length;
+  const updatedCount = reports.filter(isUpdatedRow).length;
 
   return (
     <>
@@ -209,6 +323,15 @@ export default function ReportsTable({
               <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary-600 px-2 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white">
                 <span className="live-blink h-1.5 w-1.5 rounded-full bg-accent-300" />
                 {newCount} new
+              </span>
+            )}
+            {updatedCount > 0 && (
+              <span
+                title="Reports a barangay/department updated in the last 24h"
+                className="ml-2 inline-flex items-center gap-1 rounded-full bg-accent-600 px-2 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white"
+              >
+                <span className="live-blink h-1.5 w-1.5 rounded-full bg-white" />
+                {updatedCount} updated
               </span>
             )}
           </p>
@@ -234,14 +357,25 @@ export default function ReportsTable({
             <tbody className="divide-y divide-slate-100">
               {rows.map((r, i) => {
                 const isNew = isNewRow(r);
-                const fresh = freshIds.has(r.id);
+                const updated = isUpdatedRow(r);
+                const flashClass = freshIds.has(r.id)
+                  ? "new-report-flash"
+                  : updatedIds.has(r.id)
+                    ? "updated-report-flash"
+                    : "";
+                const tint =
+                  active?.id === r.id
+                    ? "bg-primary-50/60"
+                    : updated
+                      ? "bg-accent-50/70"
+                      : isNew
+                        ? "bg-primary-50/60"
+                        : "";
                 return (
                 <tr
                   key={r.id}
-                  onClick={() => setActive(r)}
-                  className={`tap-scale cursor-pointer transition-colors hover:bg-primary-50/40 ${
-                    isNew || active?.id === r.id ? "bg-primary-50/60" : ""
-                  } ${fresh ? "new-report-flash" : ""}`}
+                  onClick={() => openReport(r)}
+                  className={`tap-scale cursor-pointer transition-colors hover:bg-primary-50/40 ${tint} ${flashClass}`}
                 >
                   <td className="px-3 py-2.5 text-xs text-slate-300">
                     {(safePage - 1) * PAGE_SIZE + i + 1}
@@ -250,7 +384,11 @@ export default function ReportsTable({
                     <span className="font-mono text-xs font-semibold text-primary-700">
                       {r.ref_code}
                     </span>
-                    {isNew && <NewChip />}
+                    {updated ? (
+                      <UpdatedChip ago={timeAgo(r.updated_at, now)} />
+                    ) : isNew ? (
+                      <NewChip />
+                    ) : null}
                     <span className="block max-w-[220px] truncate text-xs text-slate-500">
                       {r.title}
                     </span>
@@ -282,6 +420,11 @@ export default function ReportsTable({
                         minute: "2-digit",
                       })}
                     </span>
+                    {updated && (
+                      <span className="block text-[10px] font-semibold text-accent-600">
+                        updated {timeAgo(r.updated_at, now)}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2.5">
                     <StatusBadge status={r.status} />
@@ -308,9 +451,9 @@ export default function ReportsTable({
                       aria-label={`View ${r.ref_code}`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setActive(r);
+                        openReport(r);
                       }}
-                      onKeyDown={(e) => e.key === "Enter" && setActive(r)}
+                      onKeyDown={(e) => e.key === "Enter" && openReport(r)}
                       className="tap-scale inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-300 transition hover:bg-primary-50 hover:text-primary-600"
                     >
                       <Icon name="eye" size="sm" />
@@ -334,19 +477,31 @@ export default function ReportsTable({
         <div className="divide-y divide-slate-100 md:hidden">
           {rows.map((r) => {
             const isNew = isNewRow(r);
-            const fresh = freshIds.has(r.id);
+            const updated = isUpdatedRow(r);
+            const flashClass = freshIds.has(r.id)
+              ? "new-report-flash"
+              : updatedIds.has(r.id)
+                ? "updated-report-flash"
+                : "";
+            const tint = updated
+              ? "bg-accent-50/70"
+              : isNew
+                ? "bg-primary-50/60"
+                : "";
             return (
             <button
               key={r.id}
-              onClick={() => setActive(r)}
-              className={`tap-scale flex w-full items-center gap-3 px-4 py-3 text-left ${
-                isNew ? "bg-primary-50/60" : ""
-              } ${fresh ? "new-report-flash" : ""}`}
+              onClick={() => openReport(r)}
+              className={`tap-scale flex w-full items-center gap-3 px-4 py-3 text-left ${tint} ${flashClass}`}
             >
               <div className="min-w-0 flex-1">
                 <p className="font-mono text-[11px] font-semibold text-primary-700">
                   {r.ref_code}
-                  {isNew && <NewChip />}
+                  {updated ? (
+                    <UpdatedChip ago={timeAgo(r.updated_at, now)} />
+                  ) : isNew ? (
+                    <NewChip />
+                  ) : null}
                 </p>
                 <p className="truncate text-sm font-medium text-slate-800">{r.title}</p>
                 <p className="truncate text-xs text-slate-400">
@@ -397,13 +552,26 @@ export default function ReportsTable({
 
       {/* live toast — pops the moment a new report arrives over realtime */}
       {toast && (
-        <div className="page-enter fixed bottom-24 right-4 z-[70] flex max-w-[calc(100vw-2rem)] items-center gap-2.5 rounded-xl border border-primary-200 bg-white px-3.5 py-2.5 shadow-xl">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-600 text-white">
-            <Icon name="bell" size="sm" />
+        <div
+          className={`page-enter fixed bottom-24 right-4 z-[70] flex max-w-[calc(100vw-2rem)] items-center gap-2.5 rounded-xl border bg-white px-3.5 py-2.5 shadow-xl ${
+            toast.kind === "update" ? "border-accent-200" : "border-primary-200"
+          }`}
+        >
+          <span
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white ${
+              toast.kind === "update" ? "bg-accent-600" : "bg-primary-600"
+            }`}
+          >
+            <Icon name={toast.kind === "update" ? "edit" : "bell"} size="sm" />
           </span>
           <div className="min-w-0">
-            <p className="text-[10px] font-extrabold uppercase tracking-wide text-primary-600">
-              New report{toast.count > 1 ? ` ×${toast.count}` : ""}
+            <p
+              className={`text-[10px] font-extrabold uppercase tracking-wide ${
+                toast.kind === "update" ? "text-accent-600" : "text-primary-600"
+              }`}
+            >
+              {toast.kind === "update" ? "Report updated" : "New report"}
+              {toast.count > 1 ? ` ×${toast.count}` : ""}
             </p>
             <p className="truncate text-xs font-semibold text-slate-700">
               {toast.ref} — {toast.title}

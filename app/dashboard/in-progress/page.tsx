@@ -14,7 +14,8 @@ export default async function InProgressPage() {
     .from("reports")
     .select("*, categories(name, icon)")
     .eq("status", "in_progress")
-    .order("created_at", { ascending: false });
+    // most recently touched first — see the Assigned page for the rationale
+    .order("updated_at", { ascending: false });
   if (id) query = query.eq(col, id);
   const { data } = await query;
 

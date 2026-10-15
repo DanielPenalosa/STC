@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireProfile } from "@/lib/data";
+import { sendStatusUpdateEmail } from "@/lib/email";
 import { resolveBarangay } from "@/lib/detect-server";
 import { publicPhotoUrl } from "@/lib/photo";
 import { schedulePostSubmissionTasks } from "./_post_submission";
@@ -472,10 +473,16 @@ export async function updateReportStatus(
 
   const { data: report } = await supabase
     .from("reports")
-    .select("status")
+    .select("status, user_id, ref_code, title")
     .eq("id", reportId)
     .maybeSingle();
-  const current = (report as { status?: ReportStatus } | null)?.status;
+  const rep = report as {
+    status?: ReportStatus;
+    user_id?: string;
+    ref_code?: string;
+    title?: string;
+  } | null;
+  const current = rep?.status;
   if (current && !STAFF_ALLOWED[profile.role]?.includes(status)) {
     return { ok: false, error: "Your role cannot set this status" };
   }
@@ -526,6 +533,28 @@ export async function updateReportStatus(
       .update({ completed_at: new Date().toISOString() })
       .eq("report_id", reportId)
       .is("completed_at", null);
+  }
+
+  // best-effort email to the citizen — never blocks or fails the action
+  if (rep?.user_id && rep.ref_code && rep.title) {
+    const { data: reporter } = await supabase
+      .from("users")
+      .select("email, full_name")
+      .eq("id", rep.user_id)
+      .maybeSingle();
+    const r = reporter as { email: string | null; full_name: string | null } | null;
+    if (r?.email) {
+      await sendStatusUpdateEmail(
+        {
+          reportId,
+          refCode: rep.ref_code,
+          title: rep.title,
+          status,
+          note: note?.trim() || null,
+        },
+        { to: r.email, name: r.full_name }
+      );
+    }
   }
 
   revalidatePath(`/dashboard/reports/${reportId}`);

@@ -10,6 +10,7 @@ import {
   facebookConfigured,
   getFacebookPageInfo,
 } from "@/lib/facebook";
+import { sendStatusUpdateEmail } from "@/lib/email";
 import type { ReportStatus } from "@/lib/constants";
 import type {
   Barangay,
@@ -103,6 +104,16 @@ export async function setReportStatus(
 ): Promise<ActionResult> {
   await requireAdmin();
   const supabase = await createClient();
+  // grab the reporter + previous status up front (the update wipes neither,
+  // but we need the email target and only one round-trip)
+  const { data: before } = await supabase
+    .from("reports")
+    .select("status, user_id, ref_code, title")
+    .eq("id", reportId)
+    .maybeSingle();
+  const prev = before as
+    | { status?: string; user_id?: string; ref_code?: string; title?: string }
+    | null;
   const { error } = await supabase
     .from("reports")
     .update({ status })
@@ -114,6 +125,28 @@ export async function setReportStatus(
   // the admin's approval; failures land in the server logs)
   if (status === "resolved") {
     void publishToFacebook(reportId);
+  }
+
+  // best-effort email to the citizen — never blocks or fails the action
+  if (prev && prev.status !== status && prev.user_id && prev.ref_code && prev.title) {
+    const { data: reporter } = await supabase
+      .from("users")
+      .select("email, full_name")
+      .eq("id", prev.user_id)
+      .maybeSingle();
+    const r = reporter as { email: string | null; full_name: string | null } | null;
+    if (r?.email) {
+      await sendStatusUpdateEmail(
+        {
+          reportId,
+          refCode: prev.ref_code,
+          title: prev.title,
+          status,
+          note: note?.trim() || null,
+        },
+        { to: r.email, name: r.full_name }
+      );
+    }
   }
 
   revalidatePath("/dashboard/reports");
@@ -310,6 +343,41 @@ export async function markAsDuplicate(
     to_status: "closed",
     note: `Marked as duplicate of ${original.ref_code} — "${original.title}".`,
   });
+
+  // best-effort email to the duplicate's reporter — never blocks the action
+  {
+    const { data: dupRow } = await supabase
+      .from("reports")
+      .select("user_id, ref_code, title")
+      .eq("id", reportId)
+      .maybeSingle();
+    const dup = dupRow as
+      | { user_id?: string; ref_code?: string; title?: string }
+      | null;
+    if (dup?.user_id && dup.ref_code && dup.title) {
+      const { data: reporter } = await supabase
+        .from("users")
+        .select("email, full_name")
+        .eq("id", dup.user_id)
+        .maybeSingle();
+      const r = reporter as
+        | { email: string | null; full_name: string | null }
+        | null;
+      if (r?.email) {
+        await sendStatusUpdateEmail(
+          {
+            reportId,
+            refCode: dup.ref_code,
+            title: dup.title,
+            status: "closed",
+            note: `Marked as duplicate of ${original.ref_code} — "${original.title}".`,
+            subjectPrefix: "Your report (duplicate)",
+          },
+          { to: r.email, name: r.full_name }
+        );
+      }
+    }
+  }
 
   revalidatePath("/dashboard/reports");
   revalidatePath(`/dashboard/reports/${reportId}`);

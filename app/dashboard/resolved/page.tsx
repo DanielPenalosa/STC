@@ -14,7 +14,8 @@ export default async function ResolvedPage() {
     .from("reports")
     .select("*, categories(name, icon)")
     .in("status", ["resolved", "closed"])
-    .order("created_at", { ascending: false });
+    // most recently touched first — see the Assigned page for the rationale
+    .order("updated_at", { ascending: false });
   if (id) query = query.eq(col, id);
   const { data } = await query;
 

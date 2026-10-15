@@ -14,7 +14,9 @@ export default async function AssignedPage() {
     .from("reports")
     .select("*, categories(name, icon)")
     .in("status", ["assigned"])
-    .order("created_at", { ascending: false });
+    // most recently touched first — a report the unit just worked on (or an
+    // admin just updated) bubbles to the top with the cyan "UPDATED" mark
+    .order("updated_at", { ascending: false });
   if (id) query = query.eq(col, id);
   const { data } = await query;
 

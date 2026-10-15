@@ -52,7 +52,10 @@ export default async function AdminReportsPage({
         `*, profiles:users!reports_user_id_fkey(full_name), categories(id, name, icon), barangays(id, name), departments(id, name),
        report_photos(storage_path, kind)`
       )
-      .order("created_at", { ascending: false })
+      // "Most recently touched first": the DB trigger bumps reports.updated_at
+      // on every update (status change, progress note, re-routing), so a report
+      // a barangay or department just worked on bubbles straight to the top.
+      .order("updated_at", { ascending: false })
       .limit(300),
     scope
   );

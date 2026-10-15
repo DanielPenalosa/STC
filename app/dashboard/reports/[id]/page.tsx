@@ -17,6 +17,7 @@ import DuplicatesCard from "./duplicates-card";
 import NotesCard from "./notes-card";
 import PrintButton from "./print-button";
 import CopyButton from "./copy-button";
+import MarkReportSeen from "./mark-seen";
 import {
   FollowButton,
   FollowupSection,
@@ -267,6 +268,10 @@ export default async function ReportDetailPage({
 
   return (
     <div className="mx-auto max-w-7xl">
+      {/* viewing this report clears its "UPDATED" highlight in the list and
+          marks its notifications read (bell + nav badges drop) */}
+      <MarkReportSeen reportId={report.id} updatedAt={report.updated_at} />
+
       {/* ================= header ================= */}
       <Link
         href={backHref}

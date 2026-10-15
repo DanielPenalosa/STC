@@ -204,6 +204,16 @@ input[type="checkbox"] {
   animation: new-report-flash 1.9s cubic-bezier(0.22, 1, 0.36, 1) 1;
 }
 
+/* a report a barangay/department just updated while the list is open: one
+   cyan attention flash, then it settles into the "updated" row tint. */
+@keyframes updated-report-flash {
+  0%, 15% { background-color: #62c4f6; }
+  100% { background-color: rgb(232 247 254 / 0.8); }
+}
+.updated-report-flash {
+  animation: updated-report-flash 1.9s cubic-bezier(0.22, 1, 0.36, 1) 1;
+}
+
 /* leaflet container fix inside rounded cards */
 .leaflet-container {
   border-radius: inherit;
@@ -387,6 +397,7 @@ input[type="checkbox"] {
   .press,
   .nav-dot-active,
   .new-report-flash,
+  .updated-report-flash,
   .map-fade {
     animation: none !important;
     transition: none !important;

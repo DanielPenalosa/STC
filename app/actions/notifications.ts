@@ -26,6 +26,24 @@ export async function markNotificationRead(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Mark every unread notification I hold for this report as read — fired when
+ * a staff member opens the report, so the bell badge and the per-page nav
+ * badges drop without touching their other notifications.
+ */
+export async function markReportNotificationsRead(
+  reportId: string
+): Promise<void> {
+  const supabase = await createClient();
+  const profile = await requireProfile();
+  await supabase
+    .from("notifications")
+    .update({ is_read: true })
+    .eq("user_id", profile.id)
+    .eq("report_id", reportId)
+    .eq("is_read", false);
+}
+
 export async function markAllNotificationsRead(): Promise<void> {
   const supabase = await createClient();
   const profile = await requireProfile();

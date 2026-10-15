@@ -138,6 +138,76 @@ Test it: submit a report with a photo as a citizen → the report page shows the
 
 ---
 
+## 8. Status-update emails + password-reset emails via Gmail
+
+Every status change (Submitted → … → Resolved/Closed, including admin
+rejections, revision requests, and duplicate closures) emails the citizen.
+Delivery uses your Google (Gmail) account through a **Gmail App Password** —
+the same mechanism Supabase uses for its password-reset emails once you point
+its SMTP settings at the same credentials.
+
+### 8a. Create the Gmail App Password (one-time)
+
+> Requires 2-Step Verification ON — App Passwords don't exist without it.
+
+1. Open <https://myaccount.google.com/security>.
+2. Under "How you sign in to Google", turn on **2-Step Verification** if it's
+   off (any second factor works).
+3. Visit <https://myaccount.google.com/apppasswords> directly (or: Security →
+   2-Step Verification → scroll to **App passwords**).
+4. Name it `scout-app` → **Create**.
+5. Google shows a 16-character password like `abcd efgh ijkl mnop` — copy it
+   **now** (it's shown once). This is the only password you'll paste; your
+   normal Google password is never used.
+
+### 8b. Send status-update emails from the app
+
+Add two vars to `.env.local` (placeholders are already there, commented) and
+restart `npm run dev` / redeploy:
+
+```
+SMTP_USER=your.city.reports@gmail.com
+SMTP_PASS=abcd efgh ijkl mnop
+```
+
+- Works with any Gmail address (a dedicated `...@gmail.com` is recommended).
+- Missing vars → emails silently skip; the app behaves exactly as before.
+- Failures never break the status action — they log to the server console.
+- Admin kill switch: **Admin → Settings** writes `app_settings.email_updates`
+  (`off` pauses all status emails).
+
+### 8c. Send Supabase's password-reset / auth emails through the same Gmail
+
+1. Supabase Dashboard → your project → **Authentication → Emails**.
+2. Under **SMTP Settings**, toggle it on and fill:
+   | Field | Value |
+   |---|---|
+   | Sender email | `your.city.reports@gmail.com` |
+   | Sender name | `Smart Community Reporting` |
+   | Host | `smtp.gmail.com` |
+   | Port number | `587` |
+   | User name | `your.city.reports@gmail.com` |
+   | Password | the 16-char App Password (spaces are fine) |
+   | Minimum interval between emails | `60` |
+3. **Authentication → URL Configuration**:
+   - Site URL: your deployed URL (e.g. `https://your-app.vercel.app`)
+   - Redirect URLs: add `<origin>/reset-password` (and
+     `<origin>/reset-password` for localhost while developing).
+4. **Save**. The existing **Forgot password?** page now delivers through your
+   Google account; the email's link lands on `/reset-password` where the user
+   sets a new password. No app code changes needed.
+
+### 8d. Verify
+
+- Status email: change any report's status → the citizen receives
+  "Report RPT-XXXXXXXX — <status>" within seconds (check spam; Gmail sends as
+  your address).
+- Reset email: **Login → Forgot password?** → enter the account email → the
+  mail arrives with a working reset link.
+- Gmail limits: ~500 sends/day per account — ample for a barangay-scale app.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
