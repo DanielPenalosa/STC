@@ -210,10 +210,9 @@ export default async function AdminDashboard({ profile }: { profile: Profile }) 
   const actions: { icon: IconName; title: string; desc: string; href: string }[] =
     scope.isStaff
       ? [
-          { icon: "file", title: "View All Reports", desc: `Reports handled by your ${profile.role}`, href: "/dashboard/reports" },
           { icon: "inbox", title: "Newly Assigned", desc: "Accept and start processing", href: "/dashboard/assigned" },
-          { icon: "wrench", title: "In Progress", desc: "Reports you're currently working on", href: "/dashboard/in-progress" },
-          { icon: "check-circle", title: "Resolved", desc: "Completed work history", href: "/dashboard/resolved" },
+          { icon: "file", title: "View All Reports", desc: `Filter reports handled by your ${profile.role} by status`, href: "/dashboard/reports" },
+          { icon: "map", title: "Report Map", desc: "Where the reports in your area are", href: "/dashboard/map" },
         ]
       : [
           { icon: "file", title: "View All Reports", desc: "Check and manage submitted reports", href: "/dashboard/reports" },

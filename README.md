@@ -29,8 +29,8 @@ AI-assisted citizen issue reporting for local government.
 |---|---|---|
 | citizen | mobile | Home / Community / My Reports / Notifications / Profile |
 | admin | desktop | Dashboard / Reports / AI Analysis / Categories / Barangays / Departments / Users / Analytics / Settings |
-| department | desktop | Dashboard / Assigned / In Progress / Resolved |
-| barangay | desktop | Dashboard / Assigned / In Progress / Resolved |
+| department | desktop | Dashboard / Assigned (inbox) / Reports (status filters) / Map / Analytics / Settings |
+| barangay | desktop | Dashboard / Assigned (inbox) / Reports (status filters) / Map / Analytics / Settings |
 
 ## AI flow
 Citizen photo → `POST /api/analyze` → Supabase Edge Function (vision model) → suggested category, department, barangay, priority, confidence → stored in `ai_analysis` → **admin review** (accept / override). Low-confidence (< 0.6) requires manual review. AI is advisory only.

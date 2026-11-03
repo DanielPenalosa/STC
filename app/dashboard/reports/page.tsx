@@ -10,6 +10,20 @@ import ReportsTable from "./table";
 import type { Report } from "@/lib/types";
 import type { ReportStatus } from "@/lib/constants";
 
+/**
+ * Department & barangay only work through these stages — the admin-side
+ * stages (Submitted / Under Review / Assigned / Rejected) never appear in
+ * their Reports page. Un-accepted assignments live in the Assigned inbox.
+ */
+const STAFF_STATUSES = ["in_progress", "done", "resolved", "closed"];
+const STAFF_STATUS_TABS: { key: string; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "in_progress", label: "In Progress" },
+  { key: "done", label: "Pending Verification" },
+  { key: "resolved", label: "Resolved" },
+  { key: "closed", label: "Closed" },
+];
+
 const STATUS_TABS: { key: string; label: string }[] = [
   { key: "all", label: "All" },
   { key: "submitted", label: "Submitted" },
@@ -59,7 +73,17 @@ export default async function AdminReportsPage({
       .limit(300),
     scope
   );
-  if (sp.status && sp.status !== "all") query = query.eq("status", sp.status);
+  // Staff split: a report the admin assigned but nobody accepted yet lives
+  // ONLY in the Assigned inbox. Accepting flips it to in_progress, which is
+  // when it starts showing up here — so staff never chase it in two places,
+  // and pre-assignment stages stay out of their list entirely.
+  if (scope.isStaff) query = query.in("status", STAFF_STATUSES);
+  if (
+    sp.status &&
+    sp.status !== "all" &&
+    (!scope.isStaff || STAFF_STATUSES.includes(sp.status))
+  )
+    query = query.eq("status", sp.status);
   if (sp.category) query = query.eq("category_id", sp.category);
   if (sp.barangay) query = query.eq("barangay_id", sp.barangay);
   if (sp.priority) query = query.eq("priority", sp.priority);
@@ -117,6 +141,9 @@ export default async function AdminReportsPage({
   const categories = (catsRes.data as { id: string; name: string; icon: string }[]) ?? [];
   const barangays = (brgysRes.data as { id: string; name: string }[]) ?? [];
 
+  /* the tab row matches the stage list above — no admin-only stages */
+  const statusTabs = scope.isStaff ? STAFF_STATUS_TABS : STATUS_TABS;
+
   /* ===== stat cards (over the CURRENT filter set) ===== */
   const count = (s: ReportStatus) => reports.filter((r) => r.status === s).length;
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -129,6 +156,8 @@ export default async function AdminReportsPage({
       (r) =>
         ["submitted", "under_review", "verified"].includes(r.status) && isRecent(r)
     ).length,
+    verification: count("done"),
+    verificationNew: reports.filter((r) => r.status === "done" && isRecent(r)).length,
     progress: count("assigned") + count("in_progress"),
     progressNew: reports
       .filter((r) => ["assigned", "in_progress"].includes(r.status))
@@ -178,7 +207,19 @@ export default async function AdminReportsPage({
       {/* ===== stat cards ===== */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         <StatCard tone="primary" icon="layers" label="Total Reports" value={stat.total} newCount={stat.totalNew} />
-        <StatCard tone="warn" icon="clock" label="Pending" value={stat.pending} newCount={stat.pendingNew} />
+        {/* staff never see Submitted / Under Review, so their second tile is
+            the stage they hand off to the admin: Pending Verification */}
+        {scope.isStaff ? (
+          <StatCard
+            tone="warn"
+            icon="clock"
+            label="Pending Verification"
+            value={stat.verification}
+            newCount={stat.verificationNew}
+          />
+        ) : (
+          <StatCard tone="warn" icon="clock" label="Pending" value={stat.pending} newCount={stat.pendingNew} />
+        )}
         <StatCard tone="accent" icon="wrench" label="In Progress" value={stat.progress} newCount={stat.progressNew} />
         <StatCard tone="success" icon="check-circle" label="Resolved" value={stat.resolved} newCount={stat.resolvedNew} />
         <StatCard tone="slate" icon="inbox" label="Archived" value={stat.archived} newCount={stat.archivedNew} />
@@ -203,10 +244,12 @@ export default async function AdminReportsPage({
           <AutoSubmitSelect
             param="status"
             placeholder="All statuses"
-            options={STATUS_TABS.filter((t) => t.key !== "all").map((t) => ({
-              value: t.key,
-              label: t.label,
-            }))}
+            options={statusTabs
+              .filter((t) => t.key !== "all")
+              .map((t) => ({
+                value: t.key,
+                label: t.label,
+              }))}
           />
           <AutoSubmitSelect
             param="category"
@@ -226,7 +269,7 @@ export default async function AdminReportsPage({
 
       {/* ===== status quick tabs ===== */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {STATUS_TABS.map((t) => (
+        {statusTabs.map((t) => (
           <a
             key={t.key}
             href={qs({ status: t.key })}
