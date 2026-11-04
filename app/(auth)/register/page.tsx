@@ -23,6 +23,8 @@ export default function RegisterPage() {
   const [confirmSent, setConfirmSent] = useState(false);
   const [awaitingApproval, setAwaitingApproval] = useState(false);
   const [aiApproved, setAiApproved] = useState(false);
+  const [pollingStatus, setPollingStatus] = useState<'checking' | 'approved' | 'rejected' | null>(null);
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null);
 
   // keep the chosen ID photo between submit attempts
   useEffect(() => {
@@ -110,6 +112,68 @@ export default function RegisterPage() {
 
     setLoading(false);
     setAwaitingApproval(true);
+    
+    // Start polling for verification status
+    startPollingVerification();
+  }
+
+  // Poll verification status every 5 seconds
+  async function startPollingVerification() {
+    setPollingStatus('checking');
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        const supabase = createClient();
+        
+        // Try to sign in with the credentials
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        
+        if (signInError || !signInData.user) {
+          // Still waiting for approval
+          return;
+        }
+        
+        // Check verification status
+        const { data: profile } = await supabase
+          .from("users")
+          .select("verification_status, rejection_reason")
+          .eq("id", signInData.user.id)
+          .maybeSingle();
+        
+        if (profile?.verification_status === "verified") {
+          // Approved! Stop polling and redirect
+          clearInterval(pollInterval);
+          setPollingStatus('approved');
+          
+          // Wait a moment to show success message
+          setTimeout(() => {
+            router.push("/dashboard");
+          }, 2000);
+        } else if (profile?.verification_status === "rejected") {
+          // Rejected! Stop polling and show error
+          clearInterval(pollInterval);
+          setPollingStatus('rejected');
+          setRejectionReason(profile.rejection_reason || "Your registration was not approved.");
+          
+          // Sign out
+          await supabase.auth.signOut();
+        }
+        // If still "pending", keep polling
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    }, 5000); // Check every 5 seconds
+    
+    // Stop polling after 5 minutes
+    setTimeout(() => {
+      clearInterval(pollInterval);
+      if (pollingStatus === 'checking') {
+        setPollingStatus(null);
+      }
+    }, 300000); // 5 minutes
   }
 
   const inputShell =
@@ -146,20 +210,86 @@ export default function RegisterPage() {
       <div className="rounded-3xl border border-slate-200/80 bg-white p-7 text-center shadow-xl shadow-slate-900/5 sm:p-9">
         <span
           className={`mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl ${
-            aiApproved ? "bg-success-50 text-success-600" : "bg-warn-50 text-warn-600"
+            pollingStatus === 'approved' 
+              ? "bg-success-50 text-success-600"
+              : pollingStatus === 'rejected'
+              ? "bg-danger-50 text-danger-600"
+              : aiApproved 
+              ? "bg-success-50 text-success-600" 
+              : "bg-warn-50 text-warn-600"
           }`}
         >
-          <Icon name={aiApproved ? "check-circle" : "clock"} size="lg" />
+          <Icon 
+            name={
+              pollingStatus === 'approved' 
+                ? "check-circle" 
+                : pollingStatus === 'rejected'
+                ? "alert"
+                : aiApproved 
+                ? "check-circle" 
+                : "clock"
+            } 
+            size="lg" 
+          />
         </span>
-        <h1 className="text-xl font-bold text-slate-900">Registration submitted</h1>
+        
+        <h1 className="text-xl font-bold text-slate-900">
+          {pollingStatus === 'approved' 
+            ? "Account Approved!" 
+            : pollingStatus === 'rejected'
+            ? "Registration Not Approved"
+            : "Registration Submitted"}
+        </h1>
+        
         <p className="mt-2 text-sm leading-relaxed text-slate-500">
-          {aiApproved
-            ? "Your ID passed the automated verification check. An administrator gets a fast-track notification — you can sign in once they approve it."
-            : "Your account and ID photo were received. An administrator will review your registration — you can sign in once it's approved."}
+          {pollingStatus === 'approved' ? (
+            "Your account has been approved! Redirecting to dashboard..."
+          ) : pollingStatus === 'rejected' ? (
+            <>
+              {rejectionReason || "Your registration was not approved."}
+              <br />
+              <br />
+              You can try registering again with a valid ID from Sta. Cruz, Laguna.
+            </>
+          ) : pollingStatus === 'checking' ? (
+            <>
+              {aiApproved
+                ? "Your ID passed automated verification! Waiting for final approval..."
+                : "Checking your verification status..."}
+              <br />
+              <br />
+              <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                This usually takes 30-60 seconds...
+              </span>
+            </>
+          ) : (
+            <>
+              {aiApproved
+                ? "Your ID passed the automated verification check. An administrator will finalize your approval shortly."
+                : "Your account and ID photo were received. An administrator will review your registration — you can sign in once it's approved."}
+            </>
+          )}
         </p>
-        <Link href="/" className={`${btn.primary} press mt-5 w-full justify-center`}>
-          Back to home
-        </Link>
+        
+        {pollingStatus === 'rejected' ? (
+          <Link href="/register" className={`${btn.primary} press mt-5 w-full justify-center`}>
+            Try Again
+          </Link>
+        ) : pollingStatus !== 'approved' && (
+          <Link href="/" className={`${btn.primary} press mt-5 w-full justify-center`}>
+            Back to Home
+          </Link>
+        )}
+        
+        {pollingStatus === 'checking' && (
+          <p className="mt-4 text-xs leading-relaxed text-slate-400">
+            You can close this page - we'll send you an email when your account is ready.
+          </p>
+        )}
       </div>
     );
   }
