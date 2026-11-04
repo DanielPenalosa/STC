@@ -125,6 +125,116 @@ Deno.serve(async (req: Request) => {
 
 /* ---------------- OCR / extraction provider ---------------- */
 
+/**
+ * Official barangays of Sta. Cruz, Laguna (26 total).
+ */
+const STA_CRUZ_BARANGAYS = [
+  "Alipit", "Bagumbayan", "Bubukal", "Calios", "Duhat", "Gatid",
+  "Jasaan", "Labuin", "Malinao", "Oogong", "Pagsawitan", "Palasan",
+  "Patimbao", "Poblacion I", "Poblacion II", "Poblacion III",
+  "Poblacion IV", "Poblacion V", "San Jose", "San Juan",
+  "San Pablo Norte", "San Pablo Sur", "Santisima Cruz",
+  "Santo Angel Central", "Santo Angel Norte", "Santo Angel Sur"
+];
+
+type AddressValidation = {
+  isStaCruz: boolean;
+  barangayFound: string | null;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+};
+
+function validateStaCruzAddress(address: string | null): AddressValidation {
+  if (!address || address.trim().length === 0) {
+    return {
+      isStaCruz: false,
+      barangayFound: null,
+      confidence: "low",
+      reason: "Address field is empty or unreadable"
+    };
+  }
+
+  const norm = address.toLowerCase()
+    .replace(/\./g, "")
+    .replace(/,/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const hasStaCruz = /\b(sta\s*cruz|santa\s+cruz)\b/i.test(address);
+  const hasLaguna = /\blaguna\b/i.test(address);
+  
+  const otherMunicipalities = [
+    "manila", "quezon city", "calamba", "los banos", "bay", "biñan",
+    "cabuyao", "san pedro", "pagsanjan", "lumban", "cavite", "batangas",
+    "rizal", "bulacan", "pampanga", "tarlac", "nueva ecija", "zambales"
+  ];
+  
+  const hasOtherLocation = otherMunicipalities.some(loc => 
+    new RegExp(`\\b${loc}\\b`, "i").test(address)
+  );
+
+  if (hasOtherLocation && !hasStaCruz) {
+    return {
+      isStaCruz: false,
+      barangayFound: null,
+      confidence: "high",
+      reason: `Address belongs to another municipality/province`
+    };
+  }
+
+  let matchedBarangay: string | null = null;
+  for (const brgy of STA_CRUZ_BARANGAYS) {
+    const pattern = new RegExp(`\\b${brgy.replace(/\s+/g, "\\s*")}\\b`, "i");
+    if (pattern.test(address) || new RegExp(`\\bbrgy\\.?\\s*${brgy.replace(/\s+/g, "\\s*")}\\b`, "i").test(address)) {
+      matchedBarangay = brgy;
+      break;
+    }
+  }
+
+  if (hasStaCruz && hasLaguna && matchedBarangay) {
+    return {
+      isStaCruz: true,
+      barangayFound: matchedBarangay,
+      confidence: "high",
+      reason: `Verified Sta. Cruz, Laguna address with barangay ${matchedBarangay}`
+    };
+  }
+
+  if (hasStaCruz && hasLaguna) {
+    return {
+      isStaCruz: true,
+      barangayFound: null,
+      confidence: "medium",
+      reason: "Address mentions Sta. Cruz, Laguna but barangay not identified"
+    };
+  }
+
+  if (matchedBarangay && !hasOtherLocation) {
+    return {
+      isStaCruz: true,
+      barangayFound: matchedBarangay,
+      confidence: "medium",
+      reason: `Found barangay ${matchedBarangay} but municipality not explicitly stated`
+    };
+  }
+
+  if (hasStaCruz && !hasLaguna) {
+    return {
+      isStaCruz: false,
+      barangayFound: matchedBarangay,
+      confidence: "low",
+      reason: "Address mentions 'Santa Cruz' but province unclear"
+    };
+  }
+
+  return {
+    isStaCruz: false,
+    barangayFound: matchedBarangay,
+    confidence: "low",
+    reason: "Cannot verify if address belongs to Sta. Cruz, Laguna"
+  };
+}
+
 async function verifyId(input: {
   imageUrl: string;
   registeredFullName: string;
@@ -274,6 +384,19 @@ async function verifyId(input: {
   if (!extracted.full_name) reasons.push("Full name is not readable on the ID.");
   if (!extracted.id_number) reasons.push("ID number is not readable.");
 
+  // address residency validation
+  const addressValidation = validateStaCruzAddress(extracted.address);
+  
+  if (!addressValidation.isStaCruz) {
+    if (addressValidation.confidence === "high") {
+      reasons.push(`Address verification failed: ${addressValidation.reason}`);
+    } else {
+      reasons.push(`Address needs verification: ${addressValidation.reason}`);
+    }
+  } else if (addressValidation.confidence === "medium") {
+    reasons.push(`Address verification uncertain: ${addressValidation.reason}`);
+  }
+
   if (extracted.expiration_date && typeKey && EXPIRING_TYPES.has(typeKey)) {
     const exp = new Date(extracted.expiration_date);
     if (!Number.isNaN(exp.getTime()) && exp.getTime() < Date.now()) {
@@ -291,18 +414,21 @@ async function verifyId(input: {
   if (typeKey) score += 0.05;
   if (extracted.full_name && extracted.id_number) score += 0.05;
   if (nameMatch.matched) score += 0.1;
+  if (addressValidation.isStaCruz && addressValidation.confidence === "high") score += 0.15;
+  else if (addressValidation.isStaCruz && addressValidation.confidence === "medium") score += 0.05;
   if (quality && !quality.ok) score -= 0.2;
+  if (!addressValidation.isStaCruz && addressValidation.confidence === "high") score -= 0.3;
   score = Math.max(0, Math.min(1, score));
 
   const nameMismatch = reasons.some((r) => r.startsWith("Name on the ID"));
+  const addressFailed = !addressValidation.isStaCruz && addressValidation.confidence === "high";
+  
   const status: "passed" | "needs_review" | "failed" =
-    reasons.length === 0 && score >= AUTO_APPROVE_SCORE
-      ? "passed"
-      : nameMismatch
-      ? "needs_review" // a human must look at name mismatches — never auto-approve
-      : reasons.length > 0
-      ? "needs_review"
-      : "needs_review";
+    addressFailed
+      ? "failed" // Auto-reject clear non-residents
+      : reasons.length === 0 && score >= AUTO_APPROVE_SCORE && addressValidation.isStaCruz && addressValidation.confidence === "high"
+      ? "passed" // Auto-approve only verified Sta. Cruz residents
+      : "needs_review"; // Everything else needs human review
 
   if (status === "needs_review" && reasons.length === 0) {
     reasons.push("Verification score below auto-approval threshold.");

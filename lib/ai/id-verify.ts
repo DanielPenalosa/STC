@@ -26,12 +26,20 @@ export type ExtractedId = {
   expiration_date: string | null;
 };
 
+export type AddressValidation = {
+  isStaCruz: boolean;
+  barangayFound: string | null;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+};
+
 export type IdVerificationResult = {
   ok: boolean;
   /** "not_id" means the model could not find a document in the image */
   detected: boolean;
   quality: IdQuality | null;
   extracted: ExtractedId | null;
+  addressValidation: AddressValidation | null;
   /** 0–1 — model's confidence in the extraction */
   ocr_confidence: number;
   /** 0–1 — overall verification score after validation + name matching */
@@ -68,6 +76,129 @@ export const SUPPORTED_ID_TYPES: Record<string, string[]> = {
 const EXPIRING_TYPES = new Set(["drivers_license", "passport", "postal_id"]);
 
 /* --------------------------- name matching --------------------------- */
+
+/**
+ * Official barangays of Sta. Cruz, Laguna (26 total).
+ */
+const STA_CRUZ_BARANGAYS = [
+  "Alipit", "Bagumbayan", "Bubukal", "Calios", "Duhat", "Gatid",
+  "Jasaan", "Labuin", "Malinao", "Oogong", "Pagsawitan", "Palasan",
+  "Patimbao", "Poblacion I", "Poblacion II", "Poblacion III",
+  "Poblacion IV", "Poblacion V", "San Jose", "San Juan",
+  "San Pablo Norte", "San Pablo Sur", "Santisima Cruz",
+  "Santo Angel Central", "Santo Angel Norte", "Santo Angel Sur"
+];
+
+/**
+ * Validate if an address belongs to Sta. Cruz, Laguna.
+ * Checks for municipality name + province + barangay match.
+ */
+export function validateStaCruzAddress(address: string | null): AddressValidation {
+  if (!address || address.trim().length === 0) {
+    return {
+      isStaCruz: false,
+      barangayFound: null,
+      confidence: "low",
+      reason: "Address field is empty or unreadable"
+    };
+  }
+
+  const norm = address.toLowerCase()
+    .replace(/\./g, "")
+    .replace(/,/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Check for Santa Cruz / Sta Cruz variations
+  const hasStaCruz = /\b(sta\s*cruz|santa\s+cruz)\b/i.test(address);
+  
+  // Check for Laguna province
+  const hasLaguna = /\blaguna\b/i.test(address);
+  
+  // Check for explicit OTHER municipalities/provinces that would disqualify
+  const otherMunicipalities = [
+    "manila", "quezon city", "calamba", "los banos", "bay", "biñan",
+    "cabuyao", "san pedro", "pagsanjan", "lumban", "cavite", "batangas",
+    "rizal", "bulacan", "pampanga", "tarlac", "nueva ecija", "zambales"
+  ];
+  
+  const hasOtherLocation = otherMunicipalities.some(loc => 
+    new RegExp(`\\b${loc}\\b`, "i").test(address)
+  );
+
+  // If clearly from another location, reject
+  if (hasOtherLocation && !hasStaCruz) {
+    return {
+      isStaCruz: false,
+      barangayFound: null,
+      confidence: "high",
+      reason: `Address belongs to another municipality/province: ${address}`
+    };
+  }
+
+  // Check for barangay match
+  let matchedBarangay: string | null = null;
+  for (const brgy of STA_CRUZ_BARANGAYS) {
+    const pattern = new RegExp(`\\b${brgy.replace(/\s+/g, "\\s*")}\\b`, "i");
+    if (pattern.test(address)) {
+      matchedBarangay = brgy;
+      break;
+    }
+    // Also check for common variations like "Brgy." prefix
+    if (new RegExp(`\\bbrgy\\.?\\s*${brgy.replace(/\s+/g, "\\s*")}\\b`, "i").test(address)) {
+      matchedBarangay = brgy;
+      break;
+    }
+  }
+
+  // High confidence: Has Sta Cruz + Laguna + valid barangay
+  if (hasStaCruz && hasLaguna && matchedBarangay) {
+    return {
+      isStaCruz: true,
+      barangayFound: matchedBarangay,
+      confidence: "high",
+      reason: `Verified Sta. Cruz, Laguna address with barangay ${matchedBarangay}`
+    };
+  }
+
+  // Medium confidence: Has Sta Cruz + Laguna but no barangay found
+  if (hasStaCruz && hasLaguna) {
+    return {
+      isStaCruz: true,
+      barangayFound: null,
+      confidence: "medium",
+      reason: "Address mentions Sta. Cruz, Laguna but barangay not identified"
+    };
+  }
+
+  // Medium confidence: Has valid barangay but no explicit municipality/province
+  if (matchedBarangay && !hasOtherLocation) {
+    return {
+      isStaCruz: true,
+      barangayFound: matchedBarangay,
+      confidence: "medium",
+      reason: `Found barangay ${matchedBarangay} (official Sta. Cruz barangay) but municipality not explicitly stated`
+    };
+  }
+
+  // Low confidence: Has Sta Cruz but not Laguna (could be Santa Cruz in another province)
+  if (hasStaCruz && !hasLaguna) {
+    return {
+      isStaCruz: false,
+      barangayFound: matchedBarangay,
+      confidence: "low",
+      reason: "Address mentions 'Santa Cruz' but province is unclear - could be another Santa Cruz"
+    };
+  }
+
+  // Default: unclear
+  return {
+    isStaCruz: false,
+    barangayFound: matchedBarangay,
+    confidence: "low",
+    reason: "Cannot verify if address belongs to Sta. Cruz, Laguna"
+  };
+}
 
 /**
  * Fuzzy first/last-name match tolerant to OCR noise: tokenizes both names,
@@ -258,6 +389,7 @@ export async function verifyIdPhoto(input: {
         detected: false,
         quality,
         extracted,
+        addressValidation: null,
         ocr_confidence: ocrConfidence,
         verification_score: 0,
         status: "failed",
@@ -269,6 +401,9 @@ export async function verifyIdPhoto(input: {
 
     /* ---------- validation rules ---------- */
 
+    // address validation for Sta. Cruz, Laguna residency
+    const addressValidation = validateStaCruzAddress(extracted.address);
+    
     if (quality && !quality.ok) {
       reasons.push(
         quality.reason === "glare"
@@ -314,18 +449,51 @@ export async function verifyIdPhoto(input: {
       reasons.push("Name on the ID does not match the registered name.");
     }
 
+    // address residency check
+    if (!addressValidation.isStaCruz) {
+      if (addressValidation.confidence === "high") {
+        // Clearly from another location - auto-reject
+        reasons.push(`Address verification failed: ${addressValidation.reason}`);
+      } else if (addressValidation.confidence === "medium" || addressValidation.confidence === "low") {
+        // Unclear - needs manual review
+        reasons.push(`Address needs verification: ${addressValidation.reason}`);
+      }
+    } else if (addressValidation.confidence === "medium") {
+      // Likely Sta. Cruz but not certain - flag for review
+      reasons.push(`Address verification uncertain: ${addressValidation.reason}`);
+    }
+
     /* ---------- scoring ---------- */
     let score = ocrConfidence;
     if (typeKey) score += 0.05;
     if (extracted.full_name && extracted.id_number) score += 0.05;
     if (nameMatch.matched) score += 0.1;
+    if (addressValidation.isStaCruz && addressValidation.confidence === "high") score += 0.15;
+    else if (addressValidation.isStaCruz && addressValidation.confidence === "medium") score += 0.05;
     if (quality && !quality.ok) score -= 0.2;
+    if (!addressValidation.isStaCruz && addressValidation.confidence === "high") score -= 0.3; // Clear non-resident
     score = Math.max(0, Math.min(1, score));
 
-    // any validation issue → human review; name mismatches NEVER auto-approve.
-    // Auto-approval requires zero issues AND a score above the threshold.
-    const status: IdVerificationResult["status"] =
-      reasons.length === 0 && score >= AUTO_APPROVE_SCORE ? "passed" : "needs_review";
+    // Determine status based on validation results
+    let status: IdVerificationResult["status"];
+    
+    // Auto-reject if clearly from another location
+    if (!addressValidation.isStaCruz && addressValidation.confidence === "high") {
+      status = "failed";
+    }
+    // Auto-approve only if: no issues, high score, verified Sta. Cruz resident
+    else if (
+      reasons.length === 0 && 
+      score >= AUTO_APPROVE_SCORE && 
+      addressValidation.isStaCruz && 
+      addressValidation.confidence === "high"
+    ) {
+      status = "passed";
+    }
+    // Everything else needs manual review
+    else {
+      status = "needs_review";
+    }
 
     if (status === "needs_review" && reasons.length === 0) {
       reasons.push("Verification score below auto-approval threshold.");
@@ -336,6 +504,7 @@ export async function verifyIdPhoto(input: {
       detected: true,
       quality,
       extracted,
+      addressValidation,
       ocr_confidence: ocrConfidence,
       verification_score: score,
       status,
@@ -349,6 +518,7 @@ export async function verifyIdPhoto(input: {
       detected: false,
       quality: null,
       extracted: null,
+      addressValidation: null,
       ocr_confidence: 0,
       verification_score: 0,
       status: "needs_review",

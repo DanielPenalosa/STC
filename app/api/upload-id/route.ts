@@ -93,20 +93,33 @@ export async function POST(request: Request) {
           ? verdict.status
           : "needs_review";
         // persist the verdict the same way the Edge Function does
+        const updateData: {
+          id_verification_status: string;
+          id_verification: Record<string, unknown>;
+          verification_status?: string;
+          verified_at?: string;
+        } = {
+          id_verification_status: aiStatus,
+          id_verification: {
+            extracted: verdict.extracted ?? null,
+            address_validation: verdict.addressValidation ?? null,
+            ocr_confidence: verdict.ocr_confidence ?? null,
+            verification_score: verdict.verification_score ?? null,
+            reasons: verdict.reasons ?? [],
+            id_type: verdict.extracted?.id_type ?? null,
+            checked_at: new Date().toISOString(),
+          },
+        };
+        
+        // Auto-approve if AI verification passed with high confidence
+        if (aiStatus === "passed") {
+          updateData.verification_status = "verified";
+          updateData.verified_at = new Date().toISOString();
+        }
+        
         await createAdminClient()
           .from("users")
-          .update({
-            id_verification_status: aiStatus,
-            id_verification: {
-              extracted: (verdict as { extracted?: unknown }).extracted ?? null,
-              ocr_confidence: (verdict as { ocr_confidence?: number }).ocr_confidence ?? null,
-              verification_score: (verdict as { verification_score?: number }).verification_score ?? null,
-              reasons: (verdict as { reasons?: string[] }).reasons ?? [],
-              name_match: (verdict as { nameMatch?: boolean }).nameMatch ?? null,
-              id_type: (verdict as { id_type?: string | null }).id_type ?? null,
-              checked_at: new Date().toISOString(),
-            },
-          })
+          .update(updateData)
           .eq("id", uid);
       } else if (fullName) {
         const verdict = await verifyUserIdPhoto({
@@ -115,6 +128,17 @@ export async function POST(request: Request) {
           registeredFullName: fullName,
         });
         aiStatus = verdict?.status ?? "unavailable";
+        
+        // Auto-approve if AI passed (edge function already updated the user record)
+        if (aiStatus === "passed") {
+          await createAdminClient()
+            .from("users")
+            .update({
+              verification_status: "verified",
+              verified_at: new Date().toISOString(),
+            })
+            .eq("id", uid);
+        }
       }
     } catch {
       aiStatus = "unavailable";
