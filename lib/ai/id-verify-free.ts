@@ -187,16 +187,18 @@ export async function verifyIdPhotoFree(input: {
     const { text, confidence: rawConfidence } = await extractTextFromImage(input.imageBuffer);
     
     if (!text || text.length < 20) {
+      // FALLBACK: If OCR completely fails, approve for manual review
+      // Better to let admin check than block legitimate users
       return {
-        ok: false,
-        detected: false,
+        ok: true,
+        detected: true,
         quality: null,
         extracted: null,
         addressValidation: null,
         ocr_confidence: rawConfidence,
-        verification_score: 0,
-        status: "failed",
-        reasons: ["Could not extract readable text from ID - please upload a clearer photo"],
+        verification_score: 0.5, // Neutral score
+        status: "needs_review", // Admin must check
+        reasons: ["OCR could not read text clearly - manual admin review required"],
         model_used: "tesseract.js",
         raw: { text },
       };
@@ -207,49 +209,43 @@ export async function verifyIdPhotoFree(input: {
     // Step 2: Parse the extracted text
     const { extracted, ocrConfidence } = parseIdText(text, input.registeredFullName);
     
-    // Step 3: Validate required fields
-    if (!extracted.full_name) {
-      reasons.push("Could not find name on ID - text may be unclear");
+    // Step 3: Validate required fields (RELAXED - be very lenient)
+    const hasAnyInfo = !!(extracted.full_name || extracted.address || extracted.id_number);
+    
+    if (!hasAnyInfo) {
+      reasons.push("Could not extract any readable information from ID");
     }
     
-    if (!extracted.address) {
-      reasons.push("Could not find address on ID");
-    }
-    
-    if (!extracted.id_number) {
-      reasons.push("Could not find ID number");
-    }
-    
-    // Step 4: Name matching
+    // Step 4: Name matching (OPTIONAL - don't block on this)
     const nameMatch = namesMatch({
       registeredFullName: input.registeredFullName,
       extractedFullName: extracted.full_name,
     });
     
     if (!nameMatch.matched && extracted.full_name) {
-      reasons.push("Name on ID does not match registered name");
+      reasons.push("Name on ID may not match - review recommended");
     }
     
-    // Step 5: Address validation
+    // Step 5: Address validation (KEY DECISION POINT)
     const addressValidation = validateStaCruzAddress(extracted.address);
     
     if (!addressValidation.isStaCruz) {
       if (addressValidation.confidence === "high") {
+        // ONLY reject if CLEARLY from another location
         reasons.push(`Address verification failed: ${addressValidation.reason}`);
       } else {
-        reasons.push(`Address needs verification: ${addressValidation.reason}`);
+        // If uncertain, just flag for review but lean toward approval
+        reasons.push(`Address unclear: ${addressValidation.reason}`);
       }
-    } else if (addressValidation.confidence === "medium") {
-      reasons.push(`Address verification uncertain: ${addressValidation.reason}`);
     }
     
-    // Step 6: Calculate score
+    // Step 6: Calculate score (MORE GENEROUS)
     let score = ocrConfidence;
-    if (extracted.full_name && extracted.id_number) score += 0.05;
-    if (nameMatch.matched) score += 0.1;
-    if (addressValidation.isStaCruz && addressValidation.confidence === "high") score += 0.15;
-    else if (addressValidation.isStaCruz && addressValidation.confidence === "medium") score += 0.05;
-    if (!addressValidation.isStaCruz && addressValidation.confidence === "high") score -= 0.3;
+    if (hasAnyInfo) score += 0.2; // Any readable info is good
+    if (extracted.full_name) score += 0.1;
+    if (nameMatch.matched) score += 0.05;
+    if (addressValidation.isStaCruz) score += 0.3; // Big boost for Sta. Cruz
+    if (!addressValidation.isStaCruz && addressValidation.confidence === "high") score -= 0.5; // Only penalize clear rejects
     score = Math.max(0, Math.min(1, score));
     
     // Step 7: Determine status (RELAXED for instant approval)

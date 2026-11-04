@@ -81,140 +81,63 @@ export async function POST(request: Request) {
     // Process OCR SYNCHRONOUSLY - wait for result before responding
     if (fullName) {
       const bytes = Buffer.from(await file.arrayBuffer());
-      const hasOpenAI = process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith('sk-');
       
       try {
-        if (!hasOpenAI) {
-          console.log('[Upload ID] Starting FREE Tesseract.js OCR (synchronous)');
-          const { verifyIdPhotoFree } = await import("@/lib/ai/id-verify-free");
-          const verdict = await verifyIdPhotoFree({
-            imageBuffer: bytes,
-            registeredFullName: fullName,
-          });
-          
-          aiStatus = verdict.status;
-          
-          const updateData: {
-            id_verification_status: string;
-            id_verification: Record<string, unknown>;
-            verification_status?: string;
-            verified_at?: string;
-            rejection_reason?: string;
-          } = {
-            id_verification_status: verdict.status,
-            id_verification: {
-              extracted: verdict.extracted ?? null,
-              address_validation: verdict.addressValidation ?? null,
-              ocr_confidence: verdict.ocr_confidence ?? null,
-              verification_score: verdict.verification_score ?? null,
-              reasons: verdict.reasons ?? [],
-              id_type: verdict.extracted?.id_type ?? null,
-              checked_at: new Date().toISOString(),
-              model: "tesseract.js-free",
-            },
-          };
-          
-          // AI DECIDES: Approve if passed, Reject if failed, Review if uncertain
-          if (verdict.status === "passed") {
-            updateData.verification_status = "verified";
-            updateData.verified_at = new Date().toISOString();
-            console.log(`[Upload ID] ✅ AUTO-APPROVED: ${uid} (Sta. Cruz resident verified)`);
-          } else if (verdict.status === "failed") {
-            updateData.verification_status = "rejected";
-            updateData.rejection_reason = verdict.reasons[0] || "Address verification failed - not a Sta. Cruz, Laguna resident";
-            console.log(`[Upload ID] ❌ AUTO-REJECTED: ${uid} (${updateData.rejection_reason})`);
-          } else {
-            console.log(`[Upload ID] ⚠️ NEEDS REVIEW: ${uid} (${verdict.reasons.join(', ')})`);
-          }
-          
-          await createAdminClient()
-            .from("users")
-            .update(updateData)
-            .eq("id", uid);
-            
-          console.log(`[Upload ID] OCR completed for ${uid}: ${verdict.status}`);
-        } else if (path.startsWith("cld:")) {
-          console.log('[Upload ID] Starting OpenAI OCR (synchronous)');
-          const { verifyIdPhotoLocal } = await import("@/lib/ai/id-verify-local");
-          const verdict = await verifyIdPhotoLocal({
-            imageBase64: bytes.toString("base64"),
-            mime: file.type || "image/jpeg",
-            config: { registeredFullName: fullName, requireNameMatch: true },
-          });
-          
-          aiStatus = verdict.status;
-          
-          const updateData: {
-            id_verification_status: string;
-            id_verification: Record<string, unknown>;
-            verification_status?: string;
-            verified_at?: string;
-            rejection_reason?: string;
-          } = {
-            id_verification_status: verdict.status,
-            id_verification: {
-              extracted: verdict.extracted ?? null,
-              address_validation: verdict.addressValidation ?? null,
-              ocr_confidence: verdict.ocr_confidence ?? null,
-              verification_score: verdict.verification_score ?? null,
-              reasons: verdict.reasons ?? [],
-              id_type: verdict.extracted?.id_type ?? null,
-              checked_at: new Date().toISOString(),
-            },
-          };
-          
-          // AI DECIDES: Approve if passed, Reject if failed
-          if (verdict.status === "passed") {
-            updateData.verification_status = "verified";
-            updateData.verified_at = new Date().toISOString();
-            console.log(`[Upload ID] ✅ AUTO-APPROVED: ${uid} (OpenAI verified)`);
-          } else if (verdict.status === "failed") {
-            updateData.verification_status = "rejected";
-            updateData.rejection_reason = verdict.reasons[0] || "Address verification failed";
-            console.log(`[Upload ID] ❌ AUTO-REJECTED: ${uid}`);
-          }
-          
-          await createAdminClient()
-            .from("users")
-            .update(updateData)
-            .eq("id", uid);
+        // ALWAYS use FREE Tesseract.js OCR (no API costs, works offline)
+        console.log('[Upload ID] Starting FREE Tesseract.js OCR (synchronous)');
+        const { verifyIdPhotoFree } = await import("@/lib/ai/id-verify-free");
+        const verdict = await verifyIdPhotoFree({
+          imageBuffer: bytes,
+          registeredFullName: fullName,
+        });
+        
+        aiStatus = verdict.status;
+        
+        const updateData: {
+          id_verification_status: string;
+          id_verification: Record<string, unknown>;
+          verification_status?: string;
+          verified_at?: string;
+          rejection_reason?: string;
+        } = {
+          id_verification_status: verdict.status,
+          id_verification: {
+            extracted: verdict.extracted ?? null,
+            address_validation: verdict.addressValidation ?? null,
+            ocr_confidence: verdict.ocr_confidence ?? null,
+            verification_score: verdict.verification_score ?? null,
+            reasons: verdict.reasons ?? [],
+            id_type: verdict.extracted?.id_type ?? null,
+            checked_at: new Date().toISOString(),
+            model: "tesseract.js-free",
+          },
+        };
+        
+        // AI DECIDES: Approve if passed, Reject if failed, Review if uncertain
+        if (verdict.status === "passed") {
+          updateData.verification_status = "verified";
+          updateData.verified_at = new Date().toISOString();
+          console.log(`[Upload ID] ✅ AUTO-APPROVED: ${uid} (Sta. Cruz resident verified)`);
+        } else if (verdict.status === "failed") {
+          updateData.verification_status = "rejected";
+          updateData.rejection_reason = verdict.reasons[0] || "Address verification failed - not a Sta. Cruz, Laguna resident";
+          console.log(`[Upload ID] ❌ AUTO-REJECTED: ${uid} (${updateData.rejection_reason})`);
         } else {
-          console.log('[Upload ID] Starting Edge Function OCR (synchronous)');
-          const verdict = await verifyUserIdPhoto({
-            userId: uid,
-            idPath: path,
-            registeredFullName: fullName,
-          });
-          
-          if (verdict?.status) {
-            aiStatus = verdict.status;
-          }
-          
-          const updateData: {
-            verification_status?: string;
-            verified_at?: string;
-            rejection_reason?: string;
-          } = {};
-          
-          if (verdict?.status === "passed") {
-            updateData.verification_status = "verified";
-            updateData.verified_at = new Date().toISOString();
-            console.log(`[Upload ID] ✅ AUTO-APPROVED: ${uid} (Edge Function)`);
-          } else if (verdict?.status === "failed") {
-            updateData.verification_status = "rejected";
-            updateData.rejection_reason = "Address verification failed";
-            console.log(`[Upload ID] ❌ AUTO-REJECTED: ${uid}`);
-          }
-          
-          if (Object.keys(updateData).length > 0) {
-            await createAdminClient()
-              .from("users")
-              .update(updateData)
-              .eq("id", uid);
-          }
+          console.log(`[Upload ID] ⚠️ NEEDS REVIEW: ${uid} (${verdict.reasons.join(', ')})`);
         }
+        
+        await createAdminClient()
+          .from("users")
+          .update(updateData)
+          .eq("id", uid);
+          
+        console.log(`[Upload ID] OCR completed for ${uid}: ${verdict.status}`);
       } catch (error) {
         console.error('[Upload ID] OCR failed:', error);
+        
+        // On error, mark for manual review but don't block registration
+        aiStatus = "needs_review";
+        
         await createAdminClient()
           .from("users")
           .update({
