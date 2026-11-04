@@ -50,6 +50,17 @@ CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
 ```
 
+#### ✅ Optional: Facebook auto-posting (for posting resolved reports to Facebook Page)
+
+If you want reports to auto-post to Facebook when marked as "Resolved", you need these two variables. See `SETUP-FACEBOOK.md` and `FIX-FACEBOOK-AUTOPOST.md` for setup instructions.
+
+```
+FACEBOOK_PAGE_ID=your-page-id
+FACEBOOK_PAGE_ACCESS_TOKEN=your-long-lived-page-access-token
+```
+
+> **Note:** Without these, the app works fine but won't post to Facebook. The admin can still mark reports as resolved.
+
 #### ✅ Optional: App Origin (for Facebook posting & email links)
 
 ```
@@ -132,6 +143,17 @@ If you still see "Failed to send code", check:
 **Cause:** Environment variables only apply to new deployments.
 
 **Fix:** You must redeploy after changing environment variables. Go to Deployments → ⋯ → Redeploy.
+
+### Facebook auto-post not working when marking reports as "Resolved"
+
+**Cause:** Missing Facebook credentials (`FACEBOOK_PAGE_ID` and `FACEBOOK_PAGE_ACCESS_TOKEN`) in Vercel or invalid/expired token.
+
+**Fix:** 
+1. Follow `FIX-FACEBOOK-AUTOPOST.md` to get Facebook credentials
+2. Add them to Vercel → Settings → Environment Variables
+3. Redeploy
+4. Test connection in Admin → Settings → Facebook Page auto-posting
+5. See `SETUP-FACEBOOK.md` for complete Facebook App setup
 
 ---
 
