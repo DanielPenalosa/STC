@@ -104,6 +104,7 @@ export async function POST(request: Request) {
               id_verification: Record<string, unknown>;
               verification_status?: string;
               verified_at?: string;
+              rejection_reason?: string;
             } = {
               id_verification_status: verdict.status,
               id_verification: {
@@ -118,10 +119,19 @@ export async function POST(request: Request) {
               },
             };
             
-            // Auto-approve if AI verification passed
+            // AI DECIDES: Approve if passed, Reject if failed, Review if uncertain
             if (verdict.status === "passed") {
               updateData.verification_status = "verified";
               updateData.verified_at = new Date().toISOString();
+              console.log(`[Upload ID] ✅ AUTO-APPROVED: ${uid} (Sta. Cruz resident verified)`);
+            } else if (verdict.status === "failed") {
+              // Auto-reject if clearly not from Sta. Cruz
+              updateData.verification_status = "rejected";
+              updateData.rejection_reason = verdict.reasons[0] || "Address verification failed - not a Sta. Cruz, Laguna resident";
+              console.log(`[Upload ID] ❌ AUTO-REJECTED: ${uid} (${updateData.rejection_reason})`);
+            } else {
+              // needs_review - uncertain cases go to admin
+              console.log(`[Upload ID] ⚠️ NEEDS REVIEW: ${uid} (${verdict.reasons.join(', ')})`);
             }
             
             await createAdminClient()
@@ -144,6 +154,7 @@ export async function POST(request: Request) {
               id_verification: Record<string, unknown>;
               verification_status?: string;
               verified_at?: string;
+              rejection_reason?: string;
             } = {
               id_verification_status: verdict.status,
               id_verification: {
@@ -157,9 +168,15 @@ export async function POST(request: Request) {
               },
             };
             
+            // AI DECIDES: Approve if passed, Reject if failed
             if (verdict.status === "passed") {
               updateData.verification_status = "verified";
               updateData.verified_at = new Date().toISOString();
+              console.log(`[Upload ID] ✅ AUTO-APPROVED: ${uid} (OpenAI verified)`);
+            } else if (verdict.status === "failed") {
+              updateData.verification_status = "rejected";
+              updateData.rejection_reason = verdict.reasons[0] || "Address verification failed";
+              console.log(`[Upload ID] ❌ AUTO-REJECTED: ${uid}`);
             }
             
             await createAdminClient()
@@ -174,13 +191,26 @@ export async function POST(request: Request) {
               registeredFullName: fullName,
             });
             
+            const updateData: {
+              verification_status?: string;
+              verified_at?: string;
+              rejection_reason?: string;
+            } = {};
+            
             if (verdict?.status === "passed") {
+              updateData.verification_status = "verified";
+              updateData.verified_at = new Date().toISOString();
+              console.log(`[Upload ID] ✅ AUTO-APPROVED: ${uid} (Edge Function)`);
+            } else if (verdict?.status === "failed") {
+              updateData.verification_status = "rejected";
+              updateData.rejection_reason = "Address verification failed";
+              console.log(`[Upload ID] ❌ AUTO-REJECTED: ${uid}`);
+            }
+            
+            if (Object.keys(updateData).length > 0) {
               await createAdminClient()
                 .from("users")
-                .update({
-                  verification_status: "verified",
-                  verified_at: new Date().toISOString(),
-                })
+                .update(updateData)
                 .eq("id", uid);
             }
           }
