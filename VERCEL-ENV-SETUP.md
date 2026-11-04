@@ -61,6 +61,23 @@ FACEBOOK_PAGE_ACCESS_TOKEN=your-long-lived-page-access-token
 
 > **Note:** Without these, the app works fine but won't post to Facebook. The admin can still mark reports as resolved.
 
+#### ✅ Required: AI ID Verification (for automatic account approval)
+
+**IMPORTANT:** This is required for the AI to automatically verify user IDs and approve/reject accounts based on residency.
+
+```
+OPENAI_API_KEY=sk-your-openai-api-key
+```
+
+**How to get an OpenAI API Key:**
+1. Go to https://platform.openai.com/api-keys
+2. Sign in or create an account
+3. Click "Create new secret key"
+4. Copy the key (starts with `sk-...`)
+5. Add it to Vercel environment variables
+
+> **Note:** Without this key, all ID verifications will show "AI needs review" and require manual admin approval. The system uses OpenAI's GPT-4o-mini with vision for OCR and address extraction.
+
 #### ✅ Optional: App Origin (for Facebook posting & email links)
 
 ```
@@ -113,6 +130,7 @@ If you still see "Failed to send code", check:
 | `CLOUDINARY_API_SECRET` | Cloudinary API secret | ⚪ Optional |
 | `FACEBOOK_PAGE_ID` | Facebook Page ID | ⚪ Optional |
 | `FACEBOOK_PAGE_ACCESS_TOKEN` | Facebook page token | ⚪ Optional |
+| `OPENAI_API_KEY` | OpenAI API key for AI ID verification | ✅ Yes (for auto-approval) |
 | `NEXT_PUBLIC_APP_ORIGIN` | Your public URL | ⚪ Optional |
 | `NEXT_PUBLIC_LOGO_URL` | Custom logo URL | ⚪ Optional |
 
@@ -180,6 +198,9 @@ Use this to quickly verify you have everything in Vercel:
 - [ ] `CLOUDINARY_CLOUD_NAME` (if using Cloudinary)
 - [ ] `CLOUDINARY_API_KEY` (if using Cloudinary)
 - [ ] `CLOUDINARY_API_SECRET` (if using Cloudinary)
+- [ ] `FACEBOOK_PAGE_ID` (if using Facebook auto-post)
+- [ ] `FACEBOOK_PAGE_ACCESS_TOKEN` (if using Facebook auto-post)
+- [ ] `OPENAI_API_KEY` (required for AI ID verification)
 - [ ] `NEXT_PUBLIC_APP_ORIGIN` (your Vercel URL)
 - [ ] Redeployed after adding variables
 
