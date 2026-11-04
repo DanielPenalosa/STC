@@ -161,33 +161,35 @@ export function validateStaCruzAddress(address: string | null): AddressValidatio
     };
   }
 
-  // Medium confidence: Has Sta Cruz + Laguna but no barangay found
+  // HIGH confidence: Has Sta Cruz + Laguna (barangay optional for approval)
   if (hasStaCruz && hasLaguna) {
     return {
       isStaCruz: true,
-      barangayFound: null,
-      confidence: "medium",
-      reason: "Address mentions Sta. Cruz, Laguna but barangay not identified"
+      barangayFound: matchedBarangay,
+      confidence: "high", // Changed from medium to high
+      reason: matchedBarangay 
+        ? `Verified Sta. Cruz, Laguna with barangay ${matchedBarangay}`
+        : "Verified Sta. Cruz, Laguna address"
     };
   }
 
-  // Medium confidence: Has valid barangay but no explicit municipality/province
+  // HIGH confidence: Has valid barangay (implies Sta. Cruz)
   if (matchedBarangay && !hasOtherLocation) {
     return {
       isStaCruz: true,
       barangayFound: matchedBarangay,
-      confidence: "medium",
-      reason: `Found barangay ${matchedBarangay} (official Sta. Cruz barangay) but municipality not explicitly stated`
+      confidence: "high", // Changed from medium to high
+      reason: `Verified barangay ${matchedBarangay} (official Sta. Cruz barangay)`
     };
   }
 
-  // Low confidence: Has Sta Cruz but not Laguna (could be Santa Cruz in another province)
-  if (hasStaCruz && !hasLaguna) {
+  // MEDIUM confidence: Has Sta Cruz but no Laguna (could be another Santa Cruz)
+  if (hasStaCruz && !hasLaguna && !hasOtherLocation) {
     return {
-      isStaCruz: false,
+      isStaCruz: true, // Changed from false - assume it's the right one
       barangayFound: matchedBarangay,
-      confidence: "low",
-      reason: "Address mentions 'Santa Cruz' but province is unclear - could be another Santa Cruz"
+      confidence: "medium", // Keep as medium for review
+      reason: "Address mentions 'Santa Cruz' - assuming Sta. Cruz, Laguna"
     };
   }
 

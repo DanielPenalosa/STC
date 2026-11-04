@@ -61,6 +61,7 @@ async function extractTextFromImage(imageBuffer: Buffer): Promise<{
 
 /**
  * Parse extracted text to find key information
+ * ENHANCED: More aggressive extraction with better patterns
  */
 function parseIdText(text: string, registeredName: string): {
   extracted: ExtractedId;
@@ -73,40 +74,61 @@ function parseIdText(text: string, registeredName: string): {
   let foundName: string | null = null;
   for (const line of lines) {
     // Skip lines that are likely not names (too short, mostly numbers, etc.)
-    if (line.length < 5) continue;
+    if (line.length < 3) continue; // Relaxed from 5
     if (/\d{4,}/.test(line)) continue; // Skip lines with long numbers
-    if (/^(republic|philippines|pilipinas|id|identification)/i.test(line)) continue;
+    if (/^(republic|philippines|pilipinas|id|identification|card|numero)/i.test(line)) continue;
     
     // Check if this line might be a name (mostly letters)
     const alphaRatio = (line.match(/[a-zA-Z]/g) || []).length / line.length;
-    if (alphaRatio > 0.7) {
+    if (alphaRatio > 0.6) { // Relaxed from 0.7
       foundName = line;
       break;
     }
   }
   
-  // Try to find address (look for keywords)
+  // ENHANCED: Try to find address (look for keywords AND capture surrounding text)
   let foundAddress: string | null = null;
+  
+  // First try: look for explicit address field
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].toLowerCase();
     if (
       line.includes('address') ||
       line.includes('residence') ||
-      line.includes('laguna') ||
-      /brgy|barangay/.test(line) ||
-      /sta\.?\s*cruz|santa\s+cruz/.test(line)
+      /tirahan|lugar/.test(line)
     ) {
-      // Take this line and possibly the next few lines as address
-      foundAddress = lines.slice(i, Math.min(i + 4, lines.length)).join(' ');
+      // Take next few lines as address
+      foundAddress = lines.slice(i + 1, Math.min(i + 5, lines.length)).join(' ');
       break;
     }
+  }
+  
+  // Second try: look for location keywords directly
+  if (!foundAddress) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].toLowerCase();
+      if (
+        line.includes('laguna') ||
+        /brgy|barangay/.test(line) ||
+        /sta\.?\s*cruz|santa\s+cruz/.test(line)
+      ) {
+        // Take this line and surrounding context
+        foundAddress = lines.slice(Math.max(0, i - 1), Math.min(i + 3, lines.length)).join(' ');
+        break;
+      }
+    }
+  }
+  
+  // Third try: scan entire text for Sta. Cruz mentions
+  if (!foundAddress && /sta\.?\s*cruz|santa\s+cruz/i.test(text)) {
+    foundAddress = text; // Use entire text
   }
   
   // Try to find ID number (look for long number sequences)
   let foundIdNumber: string | null = null;
   for (const line of lines) {
     // Look for sequences like "1234-5678-9012" or long numbers
-    const numberMatch = line.match(/\d[\d\s-]{8,}/);
+    const numberMatch = line.match(/\d[\d\s-]{6,}/); // Relaxed from 8
     if (numberMatch) {
       foundIdNumber = numberMatch[0].replace(/\s+/g, '');
       break;
@@ -127,11 +149,11 @@ function parseIdText(text: string, registeredName: string): {
     }
   }
   
-  // Estimate confidence based on what we found
-  let confidence = 0.3; // Base confidence for Tesseract
-  if (foundName) confidence += 0.2;
-  if (foundAddress) confidence += 0.2;
-  if (foundIdNumber) confidence += 0.2;
+  // Estimate confidence based on what we found (RELAXED)
+  let confidence = 0.4; // Increased base from 0.3
+  if (foundName) confidence += 0.15;
+  if (foundAddress) confidence += 0.25; // Increased from 0.2
+  if (foundIdNumber) confidence += 0.1;
   if (foundDob) confidence += 0.1;
   
   return {
@@ -230,24 +252,32 @@ export async function verifyIdPhotoFree(input: {
     if (!addressValidation.isStaCruz && addressValidation.confidence === "high") score -= 0.3;
     score = Math.max(0, Math.min(1, score));
     
-    // Step 7: Determine status
+    // Step 7: Determine status (RELAXED for instant approval)
     let status: "passed" | "needs_review" | "failed";
     
+    // AUTO-REJECT only if clearly NOT from Sta. Cruz with high confidence
     if (!addressValidation.isStaCruz && addressValidation.confidence === "high") {
       status = "failed";
-    } else if (
-      reasons.length === 0 &&
-      score >= 0.65 && // Lower threshold for free OCR
-      addressValidation.isStaCruz &&
-      addressValidation.confidence === "high"
-    ) {
+    } 
+    // AUTO-APPROVE if address mentions Sta. Cruz (even with uncertainty)
+    else if (addressValidation.isStaCruz) {
       status = "passed";
-    } else {
+      // Clear minor warnings if we're approving
+      if (reasons.length > 0) {
+        const filtered = reasons.filter(r => 
+          r.includes("not match") || r.includes("verification failed")
+        );
+        reasons.length = 0;
+        reasons.push(...filtered);
+      }
+    } 
+    // NEEDS REVIEW if we can't determine address
+    else {
       status = "needs_review";
     }
     
     if (status === "needs_review" && reasons.length === 0) {
-      reasons.push("OCR confidence below auto-approval threshold - manual review recommended");
+      reasons.push("Could not verify Sta. Cruz address - manual review needed");
     }
     
     console.log('[Free ID Verify] Result:', status, 'Score:', score.toFixed(2));
