@@ -113,16 +113,30 @@ If your page URL is `facebook.com/YourPageName`, you can get the ID:
 4. For Site URL, enter: `https://stc-tau.vercel.app`
 5. Click **Save** → **Continue**
 
-### Step 4: Get User Access Token
+### Step 4: Get User Access Token with Required Permissions
 
 1. In the left menu, click **Tools** → **Graph API Explorer**
 2. In the top bar:
    - **Application**: Select your app (SCOUT Sta Cruz)
    - **User or Page**: Select "User Token" (should be default)
-3. Click **Generate Access Token**
-4. A popup will ask for permissions - click **Continue** → **OK**
-5. You now have a **Short-Lived User Access Token** (valid for 1-2 hours)
-6. **Copy this token** - we'll extend it in the next step
+3. **IMPORTANT - Add Permissions First:**
+   - Click **Permissions** dropdown (next to "Get User Access Token" button)
+   - In the search box, type "pages"
+   - Check these 3 permissions:
+     - ✅ `pages_show_list` (to list your pages)
+     - ✅ `pages_read_engagement` (to read page info)
+     - ✅ `pages_manage_posts` (to publish posts)
+   - You might also see `business_management` - that's fine to include
+   - Click outside the dropdown to close it
+4. Click **Generate Access Token**
+5. A popup will ask you to authorize these permissions:
+   - Review the permissions
+   - Click **Continue as [Your Name]**
+   - Click **OK** or **Done**
+6. You now have a **Short-Lived User Access Token** (valid for 1-2 hours)
+7. **Copy this token** - we'll extend it in the next step
+
+**Screenshot reference:** You should see "business_management", "pages_show_list", etc. listed under your app permissions.
 
 ### Step 5: Get Long-Lived User Token
 
@@ -184,14 +198,21 @@ Let's make sure your Page Token has the right permissions:
 3. Click **Debug**
 4. Check that it shows:
    - **Type**: Page
-   - **Permissions**: Should include `pages_manage_posts` and `pages_read_engagement`
+   - **Permissions**: Should include:
+     - ✅ `pages_show_list`
+     - ✅ `pages_read_engagement`
+     - ✅ `pages_manage_posts`
    - **Expires**: Never
 
-If permissions are missing:
+**If permissions are missing**, you need to start over from Step 4:
 1. Go back to Graph API Explorer
-2. Click the permissions dropdown next to "User Token"
-3. Check **pages_manage_posts** and **pages_read_engagement**
-4. Generate new token and repeat Steps 5-6
+2. Click the **Permissions** dropdown
+3. Make sure you check all 3 permissions:
+   - `pages_show_list`
+   - `pages_read_engagement`
+   - `pages_manage_posts`
+4. Generate new User Access Token
+5. Repeat Steps 5-6 to get new Page Access Token
 
 ### Step 8: Add Facebook Variables to .env.local (For Localhost Testing)
 
