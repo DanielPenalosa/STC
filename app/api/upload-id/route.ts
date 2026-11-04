@@ -86,9 +86,11 @@ export async function POST(request: Request) {
       if (fullName) {
         const bytes = Buffer.from(await file.arrayBuffer());
         
-        // Try free OCR first if OpenAI is not configured
-        if (!process.env.OPENAI_API_KEY) {
-          console.log('[Upload ID] Using FREE Tesseract.js OCR');
+        // ALWAYS use FREE OCR when OpenAI is not configured, regardless of storage
+        const hasOpenAI = process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith('sk-');
+        
+        if (!hasOpenAI) {
+          console.log('[Upload ID] Using FREE Tesseract.js OCR (no OpenAI key)');
           const { verifyIdPhotoFree } = await import("@/lib/ai/id-verify-free");
           const verdict = await verifyIdPhotoFree({
             imageBuffer: bytes,
