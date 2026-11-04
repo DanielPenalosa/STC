@@ -24,10 +24,15 @@ const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", 
  *   - size/type limits are enforced before any write
  */
 export async function POST(request: Request) {
+  console.log('[Upload ID] Request received');
+  
   try {
     const supabase = await createClient();
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id;
+    
+    console.log('[Upload ID] User ID:', uid);
+    
     if (!uid) {
       return NextResponse.json(
         { ok: false, error: "Session not ready — please try again." },
@@ -37,6 +42,9 @@ export async function POST(request: Request) {
 
     const form = await request.formData();
     const file = form.get("file");
+    
+    console.log('[Upload ID] File received:', file instanceof File ? file.name : 'NO FILE');
+    
     if (!(file instanceof File)) {
       return NextResponse.json({ ok: false, error: "No file received." }, { status: 400 });
     }
@@ -54,105 +62,58 @@ export async function POST(request: Request) {
     }
 
     /* ---------- storage (Cloudinary-first, Supabase fallback) ---------- */
+    console.log('[Upload ID] Starting storage upload...');
     let path: string;
     if (cloudinaryConfigured()) {
+      console.log('[Upload ID] Using Cloudinary storage');
       path = await cloudinaryUploadPrivate(file, `ids/${uid}`);
+      console.log('[Upload ID] Cloudinary path:', path);
     } else {
+      console.log('[Upload ID] Using Supabase storage');
       const ext = (file.name.split(".").pop() ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
       path = `${uid}/id-card.${ext || "jpg"}`;
       const { error } = await createAdminClient()
         .storage
         .from("verification-ids")
         .upload(path, file, { contentType: file.type || "image/jpeg", upsert: true });
-      if (error) throw error;
-    }
-
-    /* ---------- AI ID verification (synchronous, instant decision) ---------- */
-    let aiStatus: "passed" | "needs_review" | "failed" | "unavailable" = "unavailable";
-    
-    // Get user info for OCR
-    const { data: profile } = await supabase
-      .from("users")
-      .select("full_name")
-      .eq("id", uid)
-      .maybeSingle();
-    const fullName = profile?.full_name ?? "";
-    
-    // Process OCR SYNCHRONOUSLY - wait for result before responding
-    if (fullName) {
-      const bytes = Buffer.from(await file.arrayBuffer());
-      
-      try {
-        // ALWAYS use FREE Tesseract.js OCR (no API costs, works offline)
-        console.log('[Upload ID] Starting FREE Tesseract.js OCR (synchronous)');
-        const { verifyIdPhotoFree } = await import("@/lib/ai/id-verify-free");
-        const verdict = await verifyIdPhotoFree({
-          imageBuffer: bytes,
-          registeredFullName: fullName,
-        });
-        
-        aiStatus = verdict.status;
-        
-        const updateData: {
-          id_verification_status: string;
-          id_verification: Record<string, unknown>;
-          verification_status?: string;
-          verified_at?: string;
-          rejection_reason?: string;
-        } = {
-          id_verification_status: verdict.status,
-          id_verification: {
-            extracted: verdict.extracted ?? null,
-            address_validation: verdict.addressValidation ?? null,
-            ocr_confidence: verdict.ocr_confidence ?? null,
-            verification_score: verdict.verification_score ?? null,
-            reasons: verdict.reasons ?? [],
-            id_type: verdict.extracted?.id_type ?? null,
-            checked_at: new Date().toISOString(),
-            model: "tesseract.js-free",
-          },
-        };
-        
-        // AI DECIDES: Approve if passed, Reject if failed, Review if uncertain
-        if (verdict.status === "passed") {
-          updateData.verification_status = "verified";
-          updateData.verified_at = new Date().toISOString();
-          console.log(`[Upload ID] ✅ AUTO-APPROVED: ${uid} (Sta. Cruz resident verified)`);
-        } else if (verdict.status === "failed") {
-          updateData.verification_status = "rejected";
-          updateData.rejection_reason = verdict.reasons[0] || "Address verification failed - not a Sta. Cruz, Laguna resident";
-          console.log(`[Upload ID] ❌ AUTO-REJECTED: ${uid} (${updateData.rejection_reason})`);
-        } else {
-          console.log(`[Upload ID] ⚠️ NEEDS REVIEW: ${uid} (${verdict.reasons.join(', ')})`);
-        }
-        
-        await createAdminClient()
-          .from("users")
-          .update(updateData)
-          .eq("id", uid);
-          
-        console.log(`[Upload ID] OCR completed for ${uid}: ${verdict.status}`);
-      } catch (error) {
-        console.error('[Upload ID] OCR failed:', error);
-        
-        // On error, mark for manual review but don't block registration
-        aiStatus = "needs_review";
-        
-        await createAdminClient()
-          .from("users")
-          .update({
-            id_verification_status: "not_run",
-            id_verification: {
-              error: error instanceof Error ? error.message : 'OCR processing failed',
-              checked_at: new Date().toISOString(),
-            },
-          })
-          .eq("id", uid);
+      if (error) {
+        console.error('[Upload ID] Supabase storage error:', error);
+        throw error;
       }
+      console.log('[Upload ID] Supabase path:', path);
     }
 
+    /* ---------- NO AI - INSTANT UPLOAD, MANUAL ADMIN REVIEW ---------- */
+    console.log('[Upload ID] Photo uploaded successfully - marking for admin review');
+    
+    // SKIP AI COMPLETELY - just mark as pending for admin review
+    // This makes registration instant and never hangs
+    const aiStatus: "passed" | "needs_review" | "failed" | "unavailable" = "needs_review";
+    
+    try {
+      // Just update that ID was uploaded, admin will review manually
+      await createAdminClient()
+        .from("users")
+        .update({
+          id_verification_status: "needs_review",
+          id_verification: {
+            uploaded_at: new Date().toISOString(),
+            note: "Waiting for admin review - AI verification disabled for stability",
+          },
+        })
+        .eq("id", uid);
+      
+      console.log(`[Upload ID] ✓ ID photo saved for ${uid} - admin will review`);
+    } catch (error) {
+      console.error('[Upload ID] Database update failed:', error);
+      // Don't fail the upload just because DB update failed
+    }
+
+    console.log('[Upload ID] Returning response with status:', aiStatus);
     return NextResponse.json({ ok: true, path, ai_status: aiStatus });
   } catch (err) {
+    console.error('[Upload ID] CRITICAL ERROR:', err);
+    console.error('[Upload ID] Error stack:', err instanceof Error ? err.stack : 'No stack');
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : "Upload failed." },
       { status: 500 }

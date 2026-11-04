@@ -78,33 +78,48 @@ export default function RegisterPage() {
     // the private bucket under the caller's own folder. This avoids depending
     // on storage RLS policies being present on the live deployment.
     try {
+      console.log('[Register] Starting ID upload...');
       const fd = new FormData();
       // gentle client-side compression — OCR needs legibility, so keep
       // quality high; still typically halves the upload size
+      console.log('[Register] Compressing image...');
       fd.append("file", await compressImage(idFile, { maxEdge: 2000, quality: 0.9 }));
+      
+      console.log('[Register] Uploading to /api/upload-id...');
       const upRes = await fetch("/api/upload-id", { method: "POST", body: fd });
-      const upJson = await upRes.json().catch(() => null);
+      
+      console.log('[Register] Upload response status:', upRes.status);
+      const upJson = await upRes.json().catch((e) => {
+        console.error('[Register] Failed to parse response:', e);
+        return null;
+      });
+      
+      console.log('[Register] Upload response:', upJson);
+      
       if (!upRes.ok || !upJson?.ok) {
-        throw new Error(upJson?.error ?? "Upload failed");
+        throw new Error(upJson?.error ?? `Upload failed with status ${upRes.status}`);
       }
       const path: string = upJson.path;
+      const aiStatus = upJson.ai_status;
 
+      console.log('[Register] Saving ID path:', path, 'Status:', aiStatus);
       const saved = await saveIdPhotoPath(path);
       if (!saved.ok) throw new Error(saved.error ?? "Could not save the ID reference.");
 
-      // AI pre-verified the ID during upload — surface the instant-approval
-      // outcome (the account itself stays gated until the admin is notified)
-      if (upJson.ai_status === "passed") setAiApproved(true);
+      console.log('[Register] ✓ Registration complete - admin will review');
 
       // approval flow: sign the fresh session out — the citizen cannot enter
       // the app until an admin approves the registration
+      console.log('[Register] Signing out...');
       const supabase = createClient();
       await supabase.auth.signOut();
     } catch (err) {
+      console.error('[Register] ID upload error:', err);
       const supabase = createClient();
       await supabase.auth.signOut();
+      const errorMsg = err instanceof Error ? err.message : "unknown error";
       setError(
-        `Account created, but the ID photo failed to upload (${err instanceof Error ? err.message : "unknown error"}). Contact the administrator to complete your registration.`
+        `Account created, but ID upload failed: ${errorMsg}. Try registering again or contact support.`
       );
       setLoading(false);
       return;
@@ -214,8 +229,6 @@ export default function RegisterPage() {
               ? "bg-success-50 text-success-600"
               : pollingStatus === 'rejected'
               ? "bg-danger-50 text-danger-600"
-              : aiApproved 
-              ? "bg-success-50 text-success-600" 
               : "bg-warn-50 text-warn-600"
           }`}
         >
@@ -225,8 +238,6 @@ export default function RegisterPage() {
                 ? "check-circle" 
                 : pollingStatus === 'rejected'
                 ? "alert"
-                : aiApproved 
-                ? "check-circle" 
                 : "clock"
             } 
             size="lg" 
@@ -238,7 +249,7 @@ export default function RegisterPage() {
             ? "Account Approved!" 
             : pollingStatus === 'rejected'
             ? "Registration Not Approved"
-            : "Registration Submitted"}
+            : "Awaiting Admin Approval"}
         </h1>
         
         <p className="mt-2 text-sm leading-relaxed text-slate-500">
@@ -253,9 +264,7 @@ export default function RegisterPage() {
             </>
           ) : pollingStatus === 'checking' ? (
             <>
-              {aiApproved
-                ? "Your ID passed automated verification! Waiting for final approval..."
-                : "Checking your verification status..."}
+              Checking your verification status...
               <br />
               <br />
               <span className="inline-flex items-center gap-2 text-xs text-slate-400">
@@ -263,14 +272,12 @@ export default function RegisterPage() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                This usually takes 30-60 seconds...
+                Waiting for admin approval...
               </span>
             </>
           ) : (
             <>
-              {aiApproved
-                ? "Your ID passed the automated verification check. An administrator will finalize your approval shortly."
-                : "Your account and ID photo were received. An administrator will review your registration — you can sign in once it's approved."}
+              Your account and ID photo were received. An administrator will review your registration shortly — you can sign in once it&apos;s approved.
             </>
           )}
         </p>
