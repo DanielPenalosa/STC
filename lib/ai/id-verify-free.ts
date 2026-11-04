@@ -28,8 +28,8 @@ async function getTesseractWorker(): Promise<Worker> {
   
   worker = await createWorker('eng');
   await worker.setParameters({
-    tessedit_pageseg_mode: '1', // Automatic page segmentation with OSD
-    preserve_interword_spaces: '1',
+    tessedit_pageseg_mode: '1' as any, // Automatic page segmentation with OSD
+    preserve_interword_spaces: '1' as any,
   });
   
   return worker;
