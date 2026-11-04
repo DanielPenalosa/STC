@@ -386,12 +386,10 @@ export async function postResolvedReportToFacebook(input: {
       );
     }
 
-    /* ---- fallback: album-style multi-photo attach, BEFORE first ---- */
-    const photoIds: string[] = [];
+    /* ---- fallback: post photos directly to feed ---- */
+    const photoBuffers: { bytes: Buffer; label: "BEFORE" | "AFTER" }[] = [];
 
-    // Label each photo when it can be decoded; otherwise upload the raw
-    // bytes unlabeled (Facebook decodes formats sharp may not). A photo is
-    // only ever skipped after three failed upload attempts.
+    // Prepare both photos
     const tryPhoto = async (path: string | null, label: "BEFORE" | "AFTER") => {
       if (!path) return;
       const bytes = await loadPhotoBytes(db, path);
@@ -400,17 +398,11 @@ export async function postResolvedReportToFacebook(input: {
         return;
       }
       const labeled = await labelSinglePhoto(bytes, label);
-      try {
-        const photoId = await graphUploadPhoto(pageId, labeled ?? bytes, { published: false });
-        photoIds.push(photoId);
-        if (!labeled) {
-          console.warn(`[facebook] ${label} photo posted unlabeled (decode failed)`);
-        }
-      } catch (e) {
-        console.error(
-          `[facebook] ${label} photo upload failed after retries:`,
-          e instanceof Error ? e.message : e
-        );
+      if (labeled) {
+        photoBuffers.push({ bytes: labeled, label });
+      } else {
+        console.warn(`[facebook] ${label} photo decode failed — using original`);
+        photoBuffers.push({ bytes, label });
       }
     };
 
@@ -418,26 +410,30 @@ export async function postResolvedReportToFacebook(input: {
     await tryPhoto(input.photoAfterPath, "AFTER");
 
     let postId: string | undefined;
-    if (photoIds.length > 0) {
-      // one album-style post carrying all the photos (Before first)
-      const res = await graph<{ id: string }>("/me/feed", {
-        message: caption,
-        ...Object.fromEntries(
-          photoIds.map((id, i) => [
-            `attached_media[${i}]`,
-            JSON.stringify({ media_fbid: id }),
-          ])
-        ),
-      });
-      postId = res.id;
+    if (photoBuffers.length > 0) {
+      // Post the first photo with caption to create the feed post
+      postId = await graphUploadPhoto(pageId, photoBuffers[0].bytes, { caption, published: true });
+      
+      // If there's a second photo, upload it as unpublished and attach to the same post
+      if (photoBuffers.length > 1) {
+        try {
+          const secondPhotoId = await graphUploadPhoto(pageId, photoBuffers[1].bytes, { published: false });
+          // Attach the second photo to the existing post
+          await graph<{ success: boolean }>(`/${postId}`, {
+            attached_media: JSON.stringify([{ media_fbid: secondPhotoId }]),
+          });
+        } catch (e) {
+          console.warn(`[facebook] Failed to attach second photo:`, e instanceof Error ? e.message : e);
+        }
+      }
     } else {
       // no photos at all → plain text status post
-      const res = await graph<{ id: string }>("/me/feed", { message: caption });
+      const res = await graph<{ id: string }>(`/${pageId}/feed`, { message: caption });
       postId = res.id;
     }
 
     console.log(
-      `[facebook] posted ${input.refCode} (${photoIds.length} photo(s)) → post ${postId ?? "?"}`
+      `[facebook] posted ${input.refCode} (${photoBuffers.length} photo(s)) → post ${postId ?? "?"}`
     );
     return { ok: true, postId };
   } catch (e) {
