@@ -26,6 +26,10 @@ export function emailConfigured(): boolean {
 let transporter: Transporter | null = null;
 function getTransporter(): Transporter {
   if (!transporter) {
+    if (!emailConfigured()) {
+      console.error("[email] Cannot create transporter - missing env vars");
+      throw new Error("Email not configured");
+    }
     transporter = createTransport({
       service: "gmail",
       auth: {
@@ -178,7 +182,10 @@ export async function sendPasswordResetCode(opts: {
   to: string;
   code: string;
 }): Promise<void> {
-  if (!emailConfigured()) throw new Error("Email not configured.");
+  if (!emailConfigured()) {
+    console.error("[email] Missing required env vars: SMTP_USER, GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN");
+    throw new Error("Email not configured");
+  }
 
   const html = `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #e2e8f0">

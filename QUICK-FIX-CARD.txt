@@ -1,0 +1,55 @@
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  🔧 QUICK FIX: Email Not Working on Deployed Site              │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  PROBLEM:                                                       │
+│  ❌ "Failed to send code" on password reset                    │
+│  ❌ Status update emails not being received                    │
+│  ✅ Works on localhost                                         │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  SOLUTION (5 minutes):                                          │
+│                                                                 │
+│  1. Go to vercel.com → Your Project → Settings →               │
+│     Environment Variables                                       │
+│                                                                 │
+│  2. Add these 4 variables (copy from .env.local):              │
+│                                                                 │
+│     SMTP_USER                                                   │
+│     GMAIL_CLIENT_ID                                             │
+│     GMAIL_CLIENT_SECRET                                         │
+│     GMAIL_REFRESH_TOKEN                                         │
+│                                                                 │
+│  3. Go to Deployments → ⋯ → Redeploy                           │
+│                                                                 │
+│  4. Test password reset on deployed site                       │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  WHY THIS HAPPENS:                                              │
+│                                                                 │
+│  • .env.local is gitignored (correct — keeps secrets safe)     │
+│  • Vercel can't see files that aren't in git                   │
+│  • Must manually add environment variables in Vercel           │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  WHAT THIS FIXES:                                               │
+│                                                                 │
+│  ✅ Password reset emails                                      │
+│  ✅ Status update notifications                                │
+│  ✅ All email functionality                                    │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  NEED MORE HELP?                                                │
+│                                                                 │
+│  📄 FIX-EMAIL-DEPLOYMENT.md      Quick fix guide                │
+│  📄 VERCEL-ENV-SETUP.md          Complete Vercel setup         │
+│  📄 EMAIL-SETUP-SUMMARY.md       Technical overview            │
+│  📄 DEPLOY-VERCEL.md             Full deployment guide         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘

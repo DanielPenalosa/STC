@@ -89,8 +89,24 @@ Expand **Environment Variables** and add these (same values as your local `.env.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | your **anon public** key |
 | `SUPABASE_SERVICE_ROLE_KEY` | your **service_role** key |
 | `NEXT_PUBLIC_LOGO_URL` | *(leave empty / skip — the app defaults to `/logo.png`)* |
+| **Email Configuration (Required for password reset & status updates)** |  |
+| `SMTP_USER` | Your Gmail address (e.g., `scoutgov13@gmail.com`) |
+| `GMAIL_CLIENT_ID` | OAuth2 Client ID from Google Cloud Console |
+| `GMAIL_CLIENT_SECRET` | OAuth2 Client Secret |
+| `GMAIL_REFRESH_TOKEN` | OAuth2 Refresh Token |
+| **Optional: Cloudinary (for photo storage)** |  |
+| `CLOUDINARY_CLOUD_NAME` | Your Cloudinary cloud name |
+| `CLOUDINARY_API_KEY` | Your Cloudinary API key |
+| `CLOUDINARY_API_SECRET` | Your Cloudinary API secret |
+| **Optional: Facebook auto-posting** |  |
+| `FACEBOOK_PAGE_ID` | Facebook Page ID |
+| `FACEBOOK_PAGE_ACCESS_TOKEN` | Page access token |
+| `NEXT_PUBLIC_APP_ORIGIN` | Your Vercel URL (e.g., `https://community-reporting.vercel.app`) |
 
 Copy them straight from your local `.env.local` file to avoid typos.
+
+**⚠️ IMPORTANT FOR EMAIL TO WORK:**
+Without the Gmail OAuth2 credentials (`SMTP_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`), password reset emails and status update notifications will fail silently. If you're seeing "Failed to send code" on your deployed site, this is why. See `SETUP.md` for how to obtain these credentials.
 
 ### 5. Deploy
 
@@ -134,6 +150,8 @@ You also get **preview URLs** for every branch/PR — great for testing changes 
 
 | Problem | Fix |
 |---|---|
+| **"Failed to send code" on password reset** | Missing Gmail OAuth2 environment variables in Vercel. Add `SMTP_USER`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN` in Vercel → Settings → Environment Variables, then Redeploy. See `VERCEL-ENV-SETUP.md` for details. |
+| **Status update emails not being received** | Same as above — email configuration missing from Vercel. |
 | **"Invalid API key" / blank data** | Env var typo — check Vercel → Settings → Environment Variables, then **Redeploy** (Deployments → ⋯ → Redeploy) |
 | **Login works locally but not live** | Supabase URL Configuration doesn't include the Vercel URL — add it to Site URL + Redirect URLs |
 | **Photos fail to upload live** | Confirm you copied `NEXT_PUBLIC_SUPABASE_URL` **without** a trailing `/` |

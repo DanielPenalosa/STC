@@ -32,7 +32,17 @@ export async function sendResetCode(
     );
 
     // Send via our own Gmail SMTP
-    await sendPasswordResetCode({ to: email, code });
+    try {
+      await sendPasswordResetCode({ to: email, code });
+    } catch (emailErr) {
+      console.error("[reset] sendPasswordResetCode failed:", emailErr);
+      // If email config is missing, this will throw "Email not configured"
+      const errMsg = emailErr instanceof Error ? emailErr.message : String(emailErr);
+      if (errMsg.includes("Email not configured")) {
+        return { ok: false, error: "Email service is not configured. Contact support." };
+      }
+      return { ok: false, error: "Failed to send code. Try again." };
+    }
 
     return { ok: true };
   } catch (e) {
