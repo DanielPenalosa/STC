@@ -70,6 +70,8 @@ export async function POST(request: Request) {
     /* ---------- AI ID verification (modular pipeline) ----------
      * Best-effort: any failure leaves the account pending for manual admin
      * review — the AI assists, it never blocks or blindly approves.
+     * 
+     * Uses FREE Tesseract.js OCR when OPENAI_API_KEY is not configured.
      * Runs on the Next.js side when Cloudinary holds the asset (the Edge
      * Function can't read private Cloudinary URLs). */
     let aiStatus: "passed" | "needs_review" | "failed" | "unavailable" = "unavailable";
@@ -80,47 +82,92 @@ export async function POST(request: Request) {
         .eq("id", uid)
         .maybeSingle();
       const fullName = profile?.full_name ?? "";
+      
       if (fullName && path.startsWith("cld:")) {
-        // local pipeline — fetches the private asset via signed Cloudinary URL
-        const { verifyIdPhotoLocal } = await import("@/lib/ai/id-verify-local");
         const bytes = Buffer.from(await file.arrayBuffer());
-        const verdict = await verifyIdPhotoLocal({
-          imageBase64: bytes.toString("base64"),
-          mime: file.type || "image/jpeg",
-          config: { registeredFullName: fullName, requireNameMatch: true },
-        });
-        aiStatus = verdict.status === "passed" || verdict.status === "needs_review" || verdict.status === "failed"
-          ? verdict.status
-          : "needs_review";
-        // persist the verdict the same way the Edge Function does
-        const updateData: {
-          id_verification_status: string;
-          id_verification: Record<string, unknown>;
-          verification_status?: string;
-          verified_at?: string;
-        } = {
-          id_verification_status: aiStatus,
-          id_verification: {
-            extracted: verdict.extracted ?? null,
-            address_validation: verdict.addressValidation ?? null,
-            ocr_confidence: verdict.ocr_confidence ?? null,
-            verification_score: verdict.verification_score ?? null,
-            reasons: verdict.reasons ?? [],
-            id_type: verdict.extracted?.id_type ?? null,
-            checked_at: new Date().toISOString(),
-          },
-        };
         
-        // Auto-approve if AI verification passed with high confidence
-        if (aiStatus === "passed") {
-          updateData.verification_status = "verified";
-          updateData.verified_at = new Date().toISOString();
+        // Try free OCR first if OpenAI is not configured
+        if (!process.env.OPENAI_API_KEY) {
+          console.log('[Upload ID] Using FREE Tesseract.js OCR');
+          const { verifyIdPhotoFree } = await import("@/lib/ai/id-verify-free");
+          const verdict = await verifyIdPhotoFree({
+            imageBuffer: bytes,
+            registeredFullName: fullName,
+          });
+          aiStatus = verdict.status;
+          
+          const updateData: {
+            id_verification_status: string;
+            id_verification: Record<string, unknown>;
+            verification_status?: string;
+            verified_at?: string;
+          } = {
+            id_verification_status: aiStatus,
+            id_verification: {
+              extracted: verdict.extracted ?? null,
+              address_validation: verdict.addressValidation ?? null,
+              ocr_confidence: verdict.ocr_confidence ?? null,
+              verification_score: verdict.verification_score ?? null,
+              reasons: verdict.reasons ?? [],
+              id_type: verdict.extracted?.id_type ?? null,
+              checked_at: new Date().toISOString(),
+              model: "tesseract.js-free",
+            },
+          };
+          
+          // Auto-approve if AI verification passed
+          if (aiStatus === "passed") {
+            updateData.verification_status = "verified";
+            updateData.verified_at = new Date().toISOString();
+          }
+          
+          await createAdminClient()
+            .from("users")
+            .update(updateData)
+            .eq("id", uid);
+        } else {
+          // Use OpenAI if configured
+          console.log('[Upload ID] Using OpenAI GPT-4o-mini OCR');
+          const { verifyIdPhotoLocal } = await import("@/lib/ai/id-verify-local");
+          const verdict = await verifyIdPhotoLocal({
+            imageBase64: bytes.toString("base64"),
+            mime: file.type || "image/jpeg",
+            config: { registeredFullName: fullName, requireNameMatch: true },
+          });
+          aiStatus = verdict.status === "passed" || verdict.status === "needs_review" || verdict.status === "failed"
+            ? verdict.status
+            : "needs_review";
+          
+          // persist the verdict the same way the Edge Function does
+          const updateData: {
+            id_verification_status: string;
+            id_verification: Record<string, unknown>;
+            verification_status?: string;
+            verified_at?: string;
+          } = {
+            id_verification_status: aiStatus,
+            id_verification: {
+              extracted: verdict.extracted ?? null,
+              address_validation: verdict.addressValidation ?? null,
+              ocr_confidence: verdict.ocr_confidence ?? null,
+              verification_score: verdict.verification_score ?? null,
+              reasons: verdict.reasons ?? [],
+              id_type: verdict.extracted?.id_type ?? null,
+              checked_at: new Date().toISOString(),
+            },
+          };
+          
+          // Auto-approve if AI verification passed with high confidence
+          if (aiStatus === "passed") {
+            updateData.verification_status = "verified";
+            updateData.verified_at = new Date().toISOString();
+          }
+          
+          await createAdminClient()
+            .from("users")
+            .update(updateData)
+            .eq("id", uid);
         }
-        
-        await createAdminClient()
-          .from("users")
-          .update(updateData)
-          .eq("id", uid);
       } else if (fullName) {
         const verdict = await verifyUserIdPhoto({
           userId: uid,
