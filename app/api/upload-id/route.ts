@@ -83,7 +83,7 @@ export async function POST(request: Request) {
         .maybeSingle();
       const fullName = profile?.full_name ?? "";
       
-      if (fullName && path.startsWith("cld:")) {
+      if (fullName) {
         const bytes = Buffer.from(await file.arrayBuffer());
         
         // Try free OCR first if OpenAI is not configured
@@ -125,9 +125,9 @@ export async function POST(request: Request) {
             .from("users")
             .update(updateData)
             .eq("id", uid);
-        } else {
-          // Use OpenAI if configured
-          console.log('[Upload ID] Using OpenAI GPT-4o-mini OCR');
+        } else if (path.startsWith("cld:")) {
+          // Use OpenAI for Cloudinary images (local processing)
+          console.log('[Upload ID] Using OpenAI GPT-4o-mini OCR (Cloudinary)');
           const { verifyIdPhotoLocal } = await import("@/lib/ai/id-verify-local");
           const verdict = await verifyIdPhotoLocal({
             imageBase64: bytes.toString("base64"),
@@ -138,7 +138,6 @@ export async function POST(request: Request) {
             ? verdict.status
             : "needs_review";
           
-          // persist the verdict the same way the Edge Function does
           const updateData: {
             id_verification_status: string;
             id_verification: Record<string, unknown>;
@@ -167,24 +166,26 @@ export async function POST(request: Request) {
             .from("users")
             .update(updateData)
             .eq("id", uid);
-        }
-      } else if (fullName) {
-        const verdict = await verifyUserIdPhoto({
-          userId: uid,
-          idPath: path,
-          registeredFullName: fullName,
-        });
-        aiStatus = verdict?.status ?? "unavailable";
-        
-        // Auto-approve if AI passed (edge function already updated the user record)
-        if (aiStatus === "passed") {
-          await createAdminClient()
-            .from("users")
-            .update({
-              verification_status: "verified",
-              verified_at: new Date().toISOString(),
-            })
-            .eq("id", uid);
+        } else {
+          // Use OpenAI for Supabase storage (via Edge Function)
+          console.log('[Upload ID] Using OpenAI GPT-4o-mini OCR (Supabase Edge Function)');
+          const verdict = await verifyUserIdPhoto({
+            userId: uid,
+            idPath: path,
+            registeredFullName: fullName,
+          });
+          aiStatus = verdict?.status ?? "unavailable";
+          
+          // Auto-approve if AI passed (edge function already updated the user record)
+          if (aiStatus === "passed") {
+            await createAdminClient()
+              .from("users")
+              .update({
+                verification_status: "verified",
+                verified_at: new Date().toISOString(),
+              })
+              .eq("id", uid);
+          }
         }
       }
     } catch {
