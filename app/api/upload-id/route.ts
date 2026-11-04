@@ -71,127 +71,136 @@ export async function POST(request: Request) {
      * Best-effort: any failure leaves the account pending for manual admin
      * review — the AI assists, it never blocks or blindly approves.
      * 
-     * Uses FREE Tesseract.js OCR when OPENAI_API_KEY is not configured.
-     * Runs on the Next.js side when Cloudinary holds the asset (the Edge
-     * Function can't read private Cloudinary URLs). */
+     * OCR runs asynchronously - we save the ID first, then process in background.
+     * This prevents registration from hanging while waiting for OCR. */
     let aiStatus: "passed" | "needs_review" | "failed" | "unavailable" = "unavailable";
-    try {
-      const { data: profile } = await supabase
-        .from("users")
-        .select("full_name")
-        .eq("id", uid)
-        .maybeSingle();
-      const fullName = profile?.full_name ?? "";
+    
+    // Get user info for OCR
+    const { data: profile } = await supabase
+      .from("users")
+      .select("full_name")
+      .eq("id", uid)
+      .maybeSingle();
+    const fullName = profile?.full_name ?? "";
+    
+    // Process OCR asynchronously (don't await - return immediately)
+    if (fullName) {
+      const bytes = Buffer.from(await file.arrayBuffer());
+      const hasOpenAI = process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith('sk-');
       
-      if (fullName) {
-        const bytes = Buffer.from(await file.arrayBuffer());
-        
-        // ALWAYS use FREE OCR when OpenAI is not configured, regardless of storage
-        const hasOpenAI = process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith('sk-');
-        
-        if (!hasOpenAI) {
-          console.log('[Upload ID] Using FREE Tesseract.js OCR (no OpenAI key)');
-          const { verifyIdPhotoFree } = await import("@/lib/ai/id-verify-free");
-          const verdict = await verifyIdPhotoFree({
-            imageBuffer: bytes,
-            registeredFullName: fullName,
-          });
-          aiStatus = verdict.status;
-          
-          const updateData: {
-            id_verification_status: string;
-            id_verification: Record<string, unknown>;
-            verification_status?: string;
-            verified_at?: string;
-          } = {
-            id_verification_status: aiStatus,
-            id_verification: {
-              extracted: verdict.extracted ?? null,
-              address_validation: verdict.addressValidation ?? null,
-              ocr_confidence: verdict.ocr_confidence ?? null,
-              verification_score: verdict.verification_score ?? null,
-              reasons: verdict.reasons ?? [],
-              id_type: verdict.extracted?.id_type ?? null,
-              checked_at: new Date().toISOString(),
-              model: "tesseract.js-free",
-            },
-          };
-          
-          // Auto-approve if AI verification passed
-          if (aiStatus === "passed") {
-            updateData.verification_status = "verified";
-            updateData.verified_at = new Date().toISOString();
-          }
-          
-          await createAdminClient()
-            .from("users")
-            .update(updateData)
-            .eq("id", uid);
-        } else if (path.startsWith("cld:")) {
-          // Use OpenAI for Cloudinary images (local processing)
-          console.log('[Upload ID] Using OpenAI GPT-4o-mini OCR (Cloudinary)');
-          const { verifyIdPhotoLocal } = await import("@/lib/ai/id-verify-local");
-          const verdict = await verifyIdPhotoLocal({
-            imageBase64: bytes.toString("base64"),
-            mime: file.type || "image/jpeg",
-            config: { registeredFullName: fullName, requireNameMatch: true },
-          });
-          aiStatus = verdict.status === "passed" || verdict.status === "needs_review" || verdict.status === "failed"
-            ? verdict.status
-            : "needs_review";
-          
-          const updateData: {
-            id_verification_status: string;
-            id_verification: Record<string, unknown>;
-            verification_status?: string;
-            verified_at?: string;
-          } = {
-            id_verification_status: aiStatus,
-            id_verification: {
-              extracted: verdict.extracted ?? null,
-              address_validation: verdict.addressValidation ?? null,
-              ocr_confidence: verdict.ocr_confidence ?? null,
-              verification_score: verdict.verification_score ?? null,
-              reasons: verdict.reasons ?? [],
-              id_type: verdict.extracted?.id_type ?? null,
-              checked_at: new Date().toISOString(),
-            },
-          };
-          
-          // Auto-approve if AI verification passed with high confidence
-          if (aiStatus === "passed") {
-            updateData.verification_status = "verified";
-            updateData.verified_at = new Date().toISOString();
-          }
-          
-          await createAdminClient()
-            .from("users")
-            .update(updateData)
-            .eq("id", uid);
-        } else {
-          // Use OpenAI for Supabase storage (via Edge Function)
-          console.log('[Upload ID] Using OpenAI GPT-4o-mini OCR (Supabase Edge Function)');
-          const verdict = await verifyUserIdPhoto({
-            userId: uid,
-            idPath: path,
-            registeredFullName: fullName,
-          });
-          aiStatus = verdict?.status ?? "unavailable";
-          
-          // Auto-approve if AI passed (edge function already updated the user record)
-          if (aiStatus === "passed") {
+      // Fire and forget - process in background
+      (async () => {
+        try {
+          if (!hasOpenAI) {
+            console.log('[Upload ID] Starting FREE Tesseract.js OCR in background');
+            const { verifyIdPhotoFree } = await import("@/lib/ai/id-verify-free");
+            const verdict = await verifyIdPhotoFree({
+              imageBuffer: bytes,
+              registeredFullName: fullName,
+            });
+            
+            const updateData: {
+              id_verification_status: string;
+              id_verification: Record<string, unknown>;
+              verification_status?: string;
+              verified_at?: string;
+            } = {
+              id_verification_status: verdict.status,
+              id_verification: {
+                extracted: verdict.extracted ?? null,
+                address_validation: verdict.addressValidation ?? null,
+                ocr_confidence: verdict.ocr_confidence ?? null,
+                verification_score: verdict.verification_score ?? null,
+                reasons: verdict.reasons ?? [],
+                id_type: verdict.extracted?.id_type ?? null,
+                checked_at: new Date().toISOString(),
+                model: "tesseract.js-free",
+              },
+            };
+            
+            // Auto-approve if AI verification passed
+            if (verdict.status === "passed") {
+              updateData.verification_status = "verified";
+              updateData.verified_at = new Date().toISOString();
+            }
+            
             await createAdminClient()
               .from("users")
-              .update({
-                verification_status: "verified",
-                verified_at: new Date().toISOString(),
-              })
+              .update(updateData)
               .eq("id", uid);
+              
+            console.log(`[Upload ID] OCR completed for ${uid}: ${verdict.status}`);
+          } else if (path.startsWith("cld:")) {
+            console.log('[Upload ID] Starting OpenAI OCR in background');
+            const { verifyIdPhotoLocal } = await import("@/lib/ai/id-verify-local");
+            const verdict = await verifyIdPhotoLocal({
+              imageBase64: bytes.toString("base64"),
+              mime: file.type || "image/jpeg",
+              config: { registeredFullName: fullName, requireNameMatch: true },
+            });
+            
+            const updateData: {
+              id_verification_status: string;
+              id_verification: Record<string, unknown>;
+              verification_status?: string;
+              verified_at?: string;
+            } = {
+              id_verification_status: verdict.status,
+              id_verification: {
+                extracted: verdict.extracted ?? null,
+                address_validation: verdict.addressValidation ?? null,
+                ocr_confidence: verdict.ocr_confidence ?? null,
+                verification_score: verdict.verification_score ?? null,
+                reasons: verdict.reasons ?? [],
+                id_type: verdict.extracted?.id_type ?? null,
+                checked_at: new Date().toISOString(),
+              },
+            };
+            
+            if (verdict.status === "passed") {
+              updateData.verification_status = "verified";
+              updateData.verified_at = new Date().toISOString();
+            }
+            
+            await createAdminClient()
+              .from("users")
+              .update(updateData)
+              .eq("id", uid);
+          } else {
+            console.log('[Upload ID] Starting Edge Function OCR in background');
+            const verdict = await verifyUserIdPhoto({
+              userId: uid,
+              idPath: path,
+              registeredFullName: fullName,
+            });
+            
+            if (verdict?.status === "passed") {
+              await createAdminClient()
+                .from("users")
+                .update({
+                  verification_status: "verified",
+                  verified_at: new Date().toISOString(),
+                })
+                .eq("id", uid);
+            }
           }
+        } catch (error) {
+          console.error('[Upload ID] Background OCR failed:', error);
+          await createAdminClient()
+            .from("users")
+            .update({
+              id_verification_status: "not_run",
+              id_verification: {
+                error: error instanceof Error ? error.message : 'OCR processing failed',
+                checked_at: new Date().toISOString(),
+              },
+            })
+            .eq("id", uid);
         }
-      }
-    } catch {
-      aiStatus = "unavailable";
+      })().catch(err => console.error('[Upload ID] Background task error:', err));
+      
+      // Mark as processing so admin knows OCR is running
+      aiStatus = "unavailable"; // Will show "AI needs review" until OCR completes
     }
 
     return NextResponse.json({ ok: true, path, ai_status: aiStatus });
